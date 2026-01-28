@@ -193,6 +193,7 @@ void Error_Handler(void)
 {
     while(1)
     {
+        
         HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_4);
         HAL_Delay(200);
     }
