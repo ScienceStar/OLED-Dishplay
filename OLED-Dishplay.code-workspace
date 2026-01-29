@@ -27,7 +27,11 @@
             "editor.insertSpaces": true,
             "editor.tabSize": 4,
             "editor.autoIndent": "advanced"
-        }
+        },
+        "svn.ignoreMissingSvnWarning": true,
+        "cmake.cmakePath": "/Applications/CMake.app/Contents/bin/cmake",
+        "cmake.cpackPath": "/Applications/CMake.app/Contents/bin/cmake",
+        "cmake.ctestPath": "/Applications/CMake.app/Contents/bin/ctest"
     },
     "extensions": {
         "recommendations": [
