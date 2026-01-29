@@ -1,26 +1,19 @@
 /* USER CODE BEGIN Header */
-/**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+/***************************************************************************//**
+  文件: main.c
+  作者: Zhengyu https://gzwelink.taobao.com
+  版本: V1.0.0
+  时间: 20200401
+	平台:MINI-F103C8T6
+
+*******************************************************************************/
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "usart.h"
 #include "gpio.h"
-
+#include "esp8266.h"
+#include "tcp.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -33,12 +26,29 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
+#ifdef __GNUC__
+  /* With GCC/RAISONANCE, small printf (option LD Linker->Libraries->Small printf
+     set to 'Yes') calls __io_putchar() */
+  #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+#else
+  #define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
+#endif /* __GNUC__ */
+/**
+  * @brief  Retargets the C library printf function to the USART.
+  * @param  None
+  * @retval None
+  */
+PUTCHAR_PROTOTYPE
+{
+  /* Place your implementation of fputc here */
+  /* e.g. write a character to the EVAL_COM1 and Loop until the end of transmission */
+//  HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, 0xFFFF);
+  return ch;
+}
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -55,7 +65,74 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+volatile uint8_t UartRxData;
+uint8_t UartTxbuf[1000]={1,2,3,4,5,6,7,8,9,10};
+uint8_t UartRxbuf[1024],UartIntRxbuf[1024];
+uint16_t UartRxIndex=0,UartRxFlag,UartRxLen=0,UartRxTimer,UartRxOKFlag,UartIntRxLen;
 
+//串口清除
+uint8_t UartRecv_Clear(void)
+{
+	UartRxOKFlag=0;
+	UartRxLen=0;
+	UartIntRxLen=0;
+	UartRxIndex=0;
+	return 1;
+}
+
+//接收标志函数，返回0说明没收据接收，返回1说明有数据收到
+uint8_t Uart_RecvFlag(void)
+{
+		if(UartRxOKFlag==0x55)
+		{
+			UartRxOKFlag=0;
+			UartRxLen=UartIntRxLen;
+			memcpy(UartRxbuf,UartIntRxbuf,UartIntRxLen);//把缓冲区的数据，放入需要解析的数组
+			UartIntRxLen=0;
+			TcpClosedFlag = strstr (UartRxbuf, "CLOSED\r\n" ) ? 1 : 0;
+			return 1;
+		}
+		return 0;
+}
+//串口2在1字节接收完成回调函数
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	
+	if(huart==&huart2)//判断是否串口2
+	{
+		UartRxFlag=0x55;//接收标志置位
+		UartIntRxbuf[UartRxIndex]=UartRxData;//数据写入缓冲区
+		UartRxIndex++;//记载数目加1
+		if(UartRxIndex>=1024)//缓冲区是1024字节，如果存满，归零
+		{
+			UartRxIndex=0;
+		}
+		HAL_UART_Receive_IT(&huart2,(unsigned char*)&UartRxData,1);//继续接收下一字节
+ }
+
+}
+
+//1ms调用一次，用来判断是否收完一帧
+void UART_RecvDealwith(void)
+{
+	if(UartRxFlag==0x55)
+	{
+		if(UartIntRxLen<UartRxIndex)//UartIntRxLen小于UartRxIndex，说明有收到新的数据，把接收长度增加
+		{
+		UartIntRxLen=UartRxIndex;
+		}else
+		{
+			UartRxTimer++;
+			if(UartRxTimer>=50)//50ms,等待，没收到新数据，说明已经收完一帧
+			{
+				UartRxTimer=0;
+				UartRxFlag=0;
+				UartRxOKFlag=0x55;
+				UartRxIndex=0;
+			}
+		}
+	}
+}
 /* USER CODE END 0 */
 
 /**
@@ -64,7 +141,6 @@ void SystemClock_Config(void);
   */
 int main(void)
 {
-
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -89,7 +165,8 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-
+	HAL_UART_Receive_IT(&huart2, (uint8_t *)&UartRxData, 1);//接收中断使能
+	ESP8266_Init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -99,6 +176,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+		ESP8266_STA_TCPClient_Test();//测试TCP通讯
   }
   /* USER CODE END 3 */
 }
@@ -115,25 +193,27 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
   }
-
   /** Initializes the CPU, AHB and APB buses clocks
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -151,13 +231,11 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+
   /* USER CODE END Error_Handler_Debug */
 }
-#ifdef USE_FULL_ASSERT
+
+#ifdef  USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.
@@ -169,7 +247,9 @@ void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+     tex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
+/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
