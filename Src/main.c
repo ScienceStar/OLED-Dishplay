@@ -5,6 +5,7 @@
 #include "esp8266.h"
 #include <string.h>
 #include <stdint.h>
+#include <stdlib.h>  // ← 为 atoi
 
 /* ================== Morse Config ================== */
 #define DOT_DURATION     300
@@ -21,6 +22,7 @@ void morse_dot(void);
 void morse_dash(void);
 void morse_send(const char *text);
 const char* get_morse(char c);
+void esp8266_led_update(void);
 
 /* ================== Morse Table ================== */
 typedef struct {
@@ -83,7 +85,8 @@ volatile uint8_t UartRxData;
 uint8_t UartRxbuf[1024], UartIntRxbuf[1024];
 uint16_t UartRxIndex=0, UartRxFlag=0, UartRxLen=0, UartRxTimer=0, UartRxOKFlag=0, UartIntRxLen=0;
 uint8_t WiFiStatus = 0; // 0=未连接, 1=已连接
-extern uint8_t TcpClosedFlag; // tcp.c 全局变量
+int8_t WiFiRSSI = 0;
+extern uint8_t TcpClosedFlag;
 
 /* ================== Main ================== */
 int main(void)
@@ -95,12 +98,12 @@ int main(void)
     OLED_Init();
     OLED_Clear();
     ESP8266_Init();
-
     HAL_UART_Receive_IT(&huart2, (uint8_t*)&UartRxData, 1);
 
     int current_index = 0;
     uint32_t last_tick = HAL_GetTick();
     uint32_t last_morse_tick = HAL_GetTick();
+    uint32_t last_led_tick = HAL_GetTick();
 
     while(1)
     {
@@ -135,13 +138,20 @@ int main(void)
             if(strstr((char*)UartRxbuf,"WIFI CONNECTED")) WiFiStatus = 1;
             else if(strstr((char*)UartRxbuf,"WIFI DISCONNECTED")) WiFiStatus = 0;
 
-            // TCP CLOSED标志
+            // 解析RSSI
+            char *rssi_ptr = strstr((char*)UartRxbuf,"+CWJAP:");
+            if(rssi_ptr) WiFiRSSI = atoi(rssi_ptr+7);
+
             TcpClosedFlag = strstr((char*)UartRxbuf,"CLOSED\r\n") ? 1 : 0;
             UartRxIndex = 0;
         }
 
-        // Wi-Fi状态指示LED
-        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, WiFiStatus ? GPIO_PIN_SET : GPIO_PIN_RESET);
+        /* ---------- ESP8266 LED状态更新 ---------- */
+        if(now - last_led_tick >= 100)
+        {
+            esp8266_led_update();
+            last_led_tick = now;
+        }
     }
 }
 
@@ -197,6 +207,30 @@ void morse_send(const char *text)
     }
 }
 
+/* ================== ESP8266 LED ================== */
+void esp8266_led_update(void)
+{
+    static uint8_t step = 0;
+    static uint8_t pwm = 0;
+    static int8_t dir = 1;
+
+    if(WiFiStatus==0) // 无信号，呼吸灯
+    {
+        pwm += dir*5;
+        if(pwm >= 255) { pwm = 255; dir = -1; }
+        if(pwm <= 0)   { pwm = 0;   dir = 1; }
+        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_RESET); // PWM LED脚位占用，或使用定时器PWM
+        HAL_Delay(5); // 控制呼吸速度
+    }
+    else
+    {
+        // 有信号，用LED显示WiFiRSSI强度（简单占用GPIO）
+        if(WiFiRSSI >= -50) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_SET);
+        else if(WiFiRSSI >= -70) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_RESET);
+        else HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_RESET);
+    }
+}
+
 /* ================== UART回调 ================== */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
@@ -205,6 +239,8 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         UartRxFlag = 0x55;
         UartIntRxbuf[UartRxIndex++] = UartRxData;
         if(UartRxIndex >= 1024) UartRxIndex = 0;
+        UartIntRxLen = UartRxIndex;
+        UartRxOKFlag = 0x55;
         HAL_UART_Receive_IT(&huart2,(uint8_t*)&UartRxData,1);
     }
 }
