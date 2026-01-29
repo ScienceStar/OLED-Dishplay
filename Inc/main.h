@@ -1,22 +1,3 @@
-/* USER CODE BEGIN Header */
-/**
-  ******************************************************************************
-  * @file           : main.h
-  * @brief          : Header for main.c file.
-  *                   This file contains the common defines and extern variables
-  *                   for STM32, UART, ESP8266, LED, OLED, and Morse functionality.
-  ******************************************************************************
-  * @attention
-  *
-  * <h2><center>&copy; Copyright (c) 2020 STMicroelectronics.
-  * All rights reserved.</center></h2>
-  *
-  * This software component is licensed by ST under BSD 3-Clause license.
-  *
-  ******************************************************************************
-  */
-/* USER CODE END Header */
-
 #ifndef __MAIN_H
 #define __MAIN_H
 
@@ -24,10 +5,9 @@
 extern "C" {
 #endif
 
-/* Includes ------------------------------------------------------------------*/
 #include "stm32f1xx_hal.h"
 
-/* Exported functions prototypes ---------------------------------------------*/
+/* Exported functions prototypes */
 void Error_Handler(void);
 
 /* ================= UART & ESP8266 ================= */
@@ -41,13 +21,12 @@ extern uint16_t UartRxOKFlag;
 extern uint16_t UartIntRxLen;
 
 extern uint8_t Uart_RecvFlag(void);
-extern uint8_t UartRecv_Clear(void);           // 清空 UART 缓冲
-extern void UART_RecvDealwith(void);           // UART 轮询处理函数
+extern uint8_t UartRecv_Clear(void);
+extern void UART_RecvDealwith(void);
 
 /* ================= GPIO ================= */
 #define LED_Pin         GPIO_PIN_13
 #define LED_GPIO_Port   GPIOC
-
 #define LEDB4_Pin       GPIO_PIN_4
 #define LEDB4_GPIO_Port GPIOB
 
@@ -71,5 +50,3 @@ void SystemClock_Config(void);
 #endif
 
 #endif /* __MAIN_H */
-
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

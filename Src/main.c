@@ -211,20 +211,20 @@ void morse_send(const char *text)
 void esp8266_led_update(void)
 {
     static uint8_t step = 0;
-    static uint8_t pwm = 0;
-    static int8_t dir = 1;
 
     if(WiFiStatus==0) // 无信号，LED熄灭
     {
-        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);  // 熄灭，PC13低电平接LED(板载LED反向)
+        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);  // 板载LED反向
     }
     else
     {
-        // 有信号，用LED显示WiFiRSSI强度（简单占用GPIO）
-        if(WiFiRSSI >= -50) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET); // 高亮
-        else if(WiFiRSSI >= -70) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET); // 低亮/熄灭
-        else HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET); // 熄灭
+        // 有信号，用LED显示WiFiRSSI强度
+        if(WiFiRSSI >= -50) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+        else if(WiFiRSSI >= -70) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+        else HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
     }
+
+    step++;
 }
 
 /* ================== UART回调 ================== */
