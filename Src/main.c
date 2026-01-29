@@ -5,7 +5,7 @@
 #include "esp8266.h"
 #include <string.h>
 #include <stdint.h>
-#include <stdlib.h>  // ← 为 atoi
+#include <stdlib.h>  // atoi
 
 /* ================== Morse Config ================== */
 #define DOT_DURATION     300
@@ -51,7 +51,7 @@ const char* get_morse(char c)
     return "";
 }
 
-/* ================== Elon Musk Biography ================== */
+/* ================== Biography Lines ================== */
 const char* bio_lines[] = {
     "Elon Musk, born June 28, 1971, in Pretoria, South Africa,",
     "is an entrepreneur, inventor, and engineer known for",
@@ -114,7 +114,8 @@ int main(void)
         {
             OLED_Clear();
             OLED_ShowString(0,0,(uint8_t*)bio_lines[current_index]);
-            current_index = (current_index+1) % BIO_LINE_COUNT;
+            current_index++;
+            if(current_index >= BIO_LINE_COUNT) current_index = 0;
             last_tick = now;
         }
 
@@ -135,7 +136,7 @@ int main(void)
 
             // WiFi状态检测
             if(strstr((char*)UartRxbuf,"WIFI CONNECTED")) WiFiStatus = 1;
-            else WiFiStatus = 0;
+            else if(strstr((char*)UartRxbuf,"WIFI DISCONNECTED")) WiFiStatus = 0;
 
             // 解析RSSI
             char *rssi_ptr = strstr((char*)UartRxbuf,"+CWJAP:");
@@ -209,16 +210,21 @@ void morse_send(const char *text)
 /* ================== ESP8266 LED ================== */
 void esp8266_led_update(void)
 {
-    // WiFiStatus == 0 → LED完全熄灭
-    if(WiFiStatus == 0)
-    {
-        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_RESET); // 熄灭LED
-        return;
-    }
+    static uint8_t step = 0;
+    static uint8_t pwm = 0;
+    static int8_t dir = 1;
 
-    // WiFiStatus == 1 → 根据RSSI显示
-    if(WiFiRSSI >= -50) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_SET);
-    else HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_RESET);
+    if(WiFiStatus==0) // 无信号，LED熄灭
+    {
+        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);  // 熄灭，PC13低电平接LED(板载LED反向)
+    }
+    else
+    {
+        // 有信号，用LED显示WiFiRSSI强度（简单占用GPIO）
+        if(WiFiRSSI >= -50) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET); // 高亮
+        else if(WiFiRSSI >= -70) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET); // 低亮/熄灭
+        else HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET); // 熄灭
+    }
 }
 
 /* ================== UART回调 ================== */
