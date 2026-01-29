@@ -4,9 +4,9 @@
 #include "main.h"
 
 /* 用户配置 */
-#define User_ESP8266_SSID     "Tp-LINK-5G-F643"
+#define User_ESP8266_SSID     "TP-LINK_5G_F643"
 #define User_ESP8266_PWD      "Vast314&Star159$"
-#define User_ESP8266_TCPServer_IP     "192.168.0.6"
+#define User_ESP8266_TCPServer_IP     "192.168.0.2"
 #define User_ESP8266_TCPServer_PORT   "8888"
 
 /* 全局变量 */
