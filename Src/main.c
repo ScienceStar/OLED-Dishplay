@@ -1,6 +1,8 @@
 #include "main.h"
 #include "gpio.h"
 #include "oled.h"
+#include "usart.h"
+#include "esp8266.h"
 #include <string.h>
 #include <stdint.h>
 
@@ -76,14 +78,25 @@ const char* bio_lines[] = {
 };
 #define BIO_LINE_COUNT (sizeof(bio_lines)/sizeof(bio_lines[0]))
 
+/* ================== UART/ESP8266 Variables ================== */
+volatile uint8_t UartRxData;
+uint8_t UartRxbuf[1024], UartIntRxbuf[1024];
+uint16_t UartRxIndex=0, UartRxFlag=0, UartRxLen=0, UartRxTimer=0, UartRxOKFlag=0, UartIntRxLen=0;
+uint8_t WiFiStatus = 0; // 0=未连接, 1=已连接
+extern uint8_t TcpClosedFlag; // tcp.c 全局变量
+
 /* ================== Main ================== */
 int main(void)
 {
     HAL_Init();
     SystemClock_Config();
     MX_GPIO_Init();
+    MX_USART2_UART_Init();
     OLED_Init();
     OLED_Clear();
+    ESP8266_Init();
+
+    HAL_UART_Receive_IT(&huart2, (uint8_t*)&UartRxData, 1);
 
     int current_index = 0;
     uint32_t last_tick = HAL_GetTick();
@@ -93,7 +106,7 @@ int main(void)
     {
         uint32_t now = HAL_GetTick();
 
-        // 每秒显示一行个人传记
+        /* ---------- OLED显示个人传记 ---------- */
         if(now - last_tick >= 1000)
         {
             OLED_Clear();
@@ -103,12 +116,32 @@ int main(void)
             last_tick = now;
         }
 
-        // 摩尔斯电码每5秒闪一次
+        /* ---------- 摩尔斯电码 ---------- */
         if(now - last_morse_tick >= 5000)
         {
             morse_send("SOS");
             last_morse_tick = now;
         }
+
+        /* ---------- UART接收ESP8266数据 ---------- */
+        if(UartRxOKFlag == 0x55)
+        {
+            UartRxOKFlag = 0;
+            UartRxLen = UartIntRxLen;
+            memcpy(UartRxbuf,UartIntRxbuf,UartIntRxLen);
+            UartIntRxLen = 0;
+
+            // WiFi状态检测
+            if(strstr((char*)UartRxbuf,"WIFI CONNECTED")) WiFiStatus = 1;
+            else if(strstr((char*)UartRxbuf,"WIFI DISCONNECTED")) WiFiStatus = 0;
+
+            // TCP CLOSED标志
+            TcpClosedFlag = strstr((char*)UartRxbuf,"CLOSED\r\n") ? 1 : 0;
+            UartRxIndex = 0;
+        }
+
+        // Wi-Fi状态指示LED
+        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, WiFiStatus ? GPIO_PIN_SET : GPIO_PIN_RESET);
     }
 }
 
@@ -161,6 +194,18 @@ void morse_send(const char *text)
             HAL_Delay(LETTER_SPACE-SYMBOL_SPACE);
         }
         text++;
+    }
+}
+
+/* ================== UART回调 ================== */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if(huart == &huart2)
+    {
+        UartRxFlag = 0x55;
+        UartIntRxbuf[UartRxIndex++] = UartRxData;
+        if(UartRxIndex >= 1024) UartRxIndex = 0;
+        HAL_UART_Receive_IT(&huart2,(uint8_t*)&UartRxData,1);
     }
 }
 
