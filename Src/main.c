@@ -114,8 +114,7 @@ int main(void)
         {
             OLED_Clear();
             OLED_ShowString(0,0,(uint8_t*)bio_lines[current_index]);
-            current_index++;
-            if(current_index >= BIO_LINE_COUNT) current_index = 0;
+            current_index = (current_index+1) % BIO_LINE_COUNT;
             last_tick = now;
         }
 
@@ -136,7 +135,7 @@ int main(void)
 
             // WiFi状态检测
             if(strstr((char*)UartRxbuf,"WIFI CONNECTED")) WiFiStatus = 1;
-            else if(strstr((char*)UartRxbuf,"WIFI DISCONNECTED")) WiFiStatus = 0;
+            else WiFiStatus = 0;
 
             // 解析RSSI
             char *rssi_ptr = strstr((char*)UartRxbuf,"+CWJAP:");
@@ -210,25 +209,16 @@ void morse_send(const char *text)
 /* ================== ESP8266 LED ================== */
 void esp8266_led_update(void)
 {
-    static uint8_t step = 0;
-    static uint8_t pwm = 0;
-    static int8_t dir = 1;
+    // WiFiStatus == 0 → LED完全熄灭
+    if(WiFiStatus == 0)
+    {
+        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_RESET); // 熄灭LED
+        return;
+    }
 
-    if(WiFiStatus==0) // 无信号，呼吸灯
-    {
-        pwm += dir*5;
-        if(pwm >= 255) { pwm = 255; dir = -1; }
-        if(pwm <= 0)   { pwm = 0;   dir = 1; }
-        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_RESET); // PWM LED脚位占用，或使用定时器PWM
-        HAL_Delay(5); // 控制呼吸速度
-    }
-    else
-    {
-        // 有信号，用LED显示WiFiRSSI强度（简单占用GPIO）
-        if(WiFiRSSI >= -50) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_SET);
-        else if(WiFiRSSI >= -70) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_RESET);
-        else HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_RESET);
-    }
+    // WiFiStatus == 1 → 根据RSSI显示
+    if(WiFiRSSI >= -50) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_SET);
+    else HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14, GPIO_PIN_RESET);
 }
 
 /* ================== UART回调 ================== */
