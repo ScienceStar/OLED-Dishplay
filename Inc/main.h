@@ -3,23 +3,10 @@
   ******************************************************************************
   * @file           : main.h
   * @brief          : Header for main.c file.
-  *                   This file contains the common defines of the application.
-  ******************************************************************************
-  * @attention
-  *
-  * <h2><center>&copy; Copyright (c) 2020 STMicroelectronics.
-  * All rights reserved.</center></h2>
-  *
-  * This software component is licensed by ST under BSD 3-Clause license,
-  * the "License"; You may not use this file except in compliance with the
-  * License. You may obtain a copy of the License at:
-  *                        opensource.org/licenses/BSD-3-Clause
-  *
   ******************************************************************************
   */
 /* USER CODE END Header */
 
-/* Define to prevent recursive inclusion -------------------------------------*/
 #ifndef __MAIN_H
 #define __MAIN_H
 
@@ -27,49 +14,27 @@
 extern "C" {
 #endif
 
-/* Includes ------------------------------------------------------------------*/
 #include "stm32f1xx_hal.h"
-
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
-
-/* USER CODE END Includes */
-
-/* Exported types ------------------------------------------------------------*/
-/* USER CODE BEGIN ET */
-
-/* USER CODE END ET */
-
-/* Exported constants --------------------------------------------------------*/
-/* USER CODE BEGIN EC */
-
-/* USER CODE END EC */
-
-/* Exported macro ------------------------------------------------------------*/
-/* USER CODE BEGIN EM */
-
-/* USER CODE END EM */
 
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
 
-/* USER CODE BEGIN EFP */
+/* ================= UART & TCP ================= */
 extern uint8_t UartTxbuf[1000];
-extern uint8_t UartRxbuf[1024],UartIntRxbuf[1024];
-extern uint16_t UartRxIndex,UartRxFlag,UartRxLen,UartRxTimer,UartRxOKFlag,UartIntRxLen;
+extern uint8_t UartRxbuf[1024], UartIntRxbuf[1024];
+extern uint16_t UartRxIndex, UartRxFlag, UartRxLen, UartRxTimer, UartRxOKFlag, UartIntRxLen;
 extern uint8_t Uart_RecvFlag(void);
-extern uint8_t UartRecv_Clear(void);
-/* USER CODE END EFP */
+extern void UartRecv_Clear(void);           // 改为 void
+extern void UART_RecvDealwith(void);        // 声明 UART 轮询处理函数
 
-/* Private defines -----------------------------------------------------------*/
-/* USER CODE BEGIN Private defines */
-
-/* USER CODE END Private defines */
+/* ================= GPIO ================= */
+#define LED_Pin GPIO_PIN_13
+#define LED_GPIO_Port GPIOC
+#define LEDB4_Pin GPIO_PIN_4
+#define LEDB4_GPIO_Port GPIOB
 
 #ifdef __cplusplus
 }
 #endif
 
 #endif /* __MAIN_H */
-
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

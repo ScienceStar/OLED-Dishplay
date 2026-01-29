@@ -1,255 +1,199 @@
-/* USER CODE BEGIN Header */
-/***************************************************************************//**
-  文件: main.c
-  作者: Zhengyu https://gzwelink.taobao.com
-  版本: V1.0.0
-  时间: 20200401
-	平台:MINI-F103C8T6
-
-*******************************************************************************/
-/* USER CODE END Header */
-/* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "usart.h"
 #include "gpio.h"
-#include "esp8266.h"
-#include "tcp.h"
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
+#include "oled.h"
+#include <string.h>
+#include <stdint.h>
 
-/* USER CODE END Includes */
+/* ================== Morse Config ================== */
+#define DOT_DURATION     300
+#define DASH_DURATION    (DOT_DURATION*3)
+#define SYMBOL_SPACE     DOT_DURATION
+#define LETTER_SPACE     (DOT_DURATION*3)
+#define WORD_SPACE       (DOT_DURATION*7)
+#define BREATH_STEPS     5
 
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
-
-/* USER CODE END PTD */
-
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-#ifdef __GNUC__
-  /* With GCC/RAISONANCE, small printf (option LD Linker->Libraries->Small printf
-     set to 'Yes') calls __io_putchar() */
-  #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
-#else
-  #define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
-#endif /* __GNUC__ */
-/**
-  * @brief  Retargets the C library printf function to the USART.
-  * @param  None
-  * @retval None
-  */
-PUTCHAR_PROTOTYPE
-{
-  /* Place your implementation of fputc here */
-  /* e.g. write a character to the EVAL_COM1 and Loop until the end of transmission */
-//  HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, 0xFFFF);
-  return ch;
-}
-/* USER CODE END PM */
-
-/* Private variables ---------------------------------------------------------*/
-
-/* USER CODE BEGIN PV */
-
-/* USER CODE END PV */
-
-/* Private function prototypes -----------------------------------------------*/
+/* ================== Function Prototypes ================== */
 void SystemClock_Config(void);
-/* USER CODE BEGIN PFP */
+void breathe_led_smooth(uint32_t duration);
+void morse_dot(void);
+void morse_dash(void);
+void morse_send(const char *text);
+const char* get_morse(char c);
 
-/* USER CODE END PFP */
+/* ================== Morse Table ================== */
+typedef struct {
+    char c;
+    const char *morse;
+} MorseMap;
 
-/* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
-volatile uint8_t UartRxData;
-uint8_t UartTxbuf[1000]={1,2,3,4,5,6,7,8,9,10};
-uint8_t UartRxbuf[1024],UartIntRxbuf[1024];
-uint16_t UartRxIndex=0,UartRxFlag,UartRxLen=0,UartRxTimer,UartRxOKFlag,UartIntRxLen;
+MorseMap morse_table[] = {
+    {'A', ".-"}, {'B', "-..."}, {'C', "-.-."}, {'D', "-.."},
+    {'E', "."}, {'F', "..-."}, {'G', "--."}, {'H', "...."},
+    {'I', ".."}, {'J', ".---"}, {'K', "-.-"}, {'L', ".-.."},
+    {'M', "--"}, {'N', "-."}, {'O', "---"}, {'P', ".--."},
+    {'Q', "--.-"}, {'R', ".-."}, {'S', "..."}, {'T', "-"},
+    {'U', "..-"}, {'V', "...-"}, {'W', ".--"}, {'X', "-..-"},
+    {'Y', "-.--"}, {'Z', "--.."},
+    {'0',"-----"},{'1',".----"},{'2',"..---"},{'3',"...--"},{'4',"....-"},
+    {'5',"....."},{'6',"-...."},{'7',"--..."},{'8',"---.."},{'9',"----."},
+    {' ', " "}
+};
 
-//串口清除
-uint8_t UartRecv_Clear(void)
+const char* get_morse(char c)
 {
-	UartRxOKFlag=0;
-	UartRxLen=0;
-	UartIntRxLen=0;
-	UartRxIndex=0;
-	return 1;
+    if(c >= 'a' && c <= 'z') c -= 32;
+    for(int i=0;i<sizeof(morse_table)/sizeof(MorseMap);i++)
+        if(morse_table[i].c == c) return morse_table[i].morse;
+    return "";
 }
 
-//接收标志函数，返回0说明没收据接收，返回1说明有数据收到
-uint8_t Uart_RecvFlag(void)
-{
-		if(UartRxOKFlag==0x55)
-		{
-			UartRxOKFlag=0;
-			UartRxLen=UartIntRxLen;
-			memcpy(UartRxbuf,UartIntRxbuf,UartIntRxLen);//把缓冲区的数据，放入需要解析的数组
-			UartIntRxLen=0;
-			TcpClosedFlag = strstr (UartRxbuf, "CLOSED\r\n" ) ? 1 : 0;
-			return 1;
-		}
-		return 0;
-}
-//串口2在1字节接收完成回调函数
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-	
-	if(huart==&huart2)//判断是否串口2
-	{
-		UartRxFlag=0x55;//接收标志置位
-		UartIntRxbuf[UartRxIndex]=UartRxData;//数据写入缓冲区
-		UartRxIndex++;//记载数目加1
-		if(UartRxIndex>=1024)//缓冲区是1024字节，如果存满，归零
-		{
-			UartRxIndex=0;
-		}
-		HAL_UART_Receive_IT(&huart2,(unsigned char*)&UartRxData,1);//继续接收下一字节
- }
+/* ================== Elon Musk Biography ================== */
+const char* bio_lines[] = {
+    "Elon Musk, born June 28, 1971, in Pretoria, South Africa,",
+    "is an entrepreneur, inventor, and engineer known for",
+    "founding SpaceX, Tesla Motors, Neuralink, and The Boring Company.",
+    "He studied physics and economics and emigrated to the US to pursue",
+    "business and technology opportunities. Musk has been instrumental",
+    "in popularizing electric vehicles, private space exploration,",
+    "and sustainable energy solutions. He is recognized for ambitious",
+    "projects such as the Hyperloop, Mars colonization, and AI research.",
+    "Elon Musk's vision combines innovation in technology, energy, and",
+    "transportation to reshape the future of humanity on Earth and beyond.",
+    "He has faced both criticism and praise for his leadership style,",
+    "public statements, and relentless pursuit of goals, often pushing",
+    "the limits of conventional industry norms. Despite challenges,",
+    "his ventures have profoundly impacted the automotive, space, and",
+    "energy sectors, inspiring a new generation of engineers and innovators.",
+    "Through SpaceX, he revolutionized rocket reuse, drastically reducing",
+    "launch costs and opening possibilities for Mars exploration.",
+    "Tesla accelerated the global shift to electric vehicles, leading",
+    "innovations in battery technology and autonomous driving.",
+    "Musk continues to pursue ambitious projects, advocating for",
+    "sustainable energy, space exploration, and the development",
+    "of artificial intelligence safety. His life illustrates the",
+    "intersection of visionary thinking, technical expertise, and",
+    "entrepreneurial drive in shaping the future."
+};
+#define BIO_LINE_COUNT (sizeof(bio_lines)/sizeof(bio_lines[0]))
 
-}
-
-//1ms调用一次，用来判断是否收完一帧
-void UART_RecvDealwith(void)
-{
-	if(UartRxFlag==0x55)
-	{
-		if(UartIntRxLen<UartRxIndex)//UartIntRxLen小于UartRxIndex，说明有收到新的数据，把接收长度增加
-		{
-		UartIntRxLen=UartRxIndex;
-		}else
-		{
-			UartRxTimer++;
-			if(UartRxTimer>=50)//50ms,等待，没收到新数据，说明已经收完一帧
-			{
-				UartRxTimer=0;
-				UartRxFlag=0;
-				UartRxOKFlag=0x55;
-				UartRxIndex=0;
-			}
-		}
-	}
-}
-/* USER CODE END 0 */
-
-/**
-  * @brief  The application entry point.
-  * @retval int
-  */
+/* ================== Main ================== */
 int main(void)
 {
-  /* USER CODE BEGIN 1 */
+    HAL_Init();
+    SystemClock_Config();
+    MX_GPIO_Init();
+    OLED_Init();
+    OLED_Clear();
 
-  /* USER CODE END 1 */
+    int current_index = 0;
+    uint32_t last_tick = HAL_GetTick();
+    uint32_t last_morse_tick = HAL_GetTick();
 
-  /* MCU Configuration--------------------------------------------------------*/
+    while(1)
+    {
+        uint32_t now = HAL_GetTick();
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+        // 每秒显示一行个人传记
+        if(now - last_tick >= 1000)
+        {
+            OLED_Clear();
+            OLED_ShowString(0,0,(uint8_t*)bio_lines[current_index]);
+            current_index++;
+            if(current_index >= BIO_LINE_COUNT) current_index = 0;
+            last_tick = now;
+        }
 
-  /* USER CODE BEGIN Init */
-
-  /* USER CODE END Init */
-
-  /* Configure the system clock */
-  SystemClock_Config();
-
-  /* USER CODE BEGIN SysInit */
-
-  /* USER CODE END SysInit */
-
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_USART2_UART_Init();
-  /* USER CODE BEGIN 2 */
-	HAL_UART_Receive_IT(&huart2, (uint8_t *)&UartRxData, 1);//接收中断使能
-	ESP8266_Init();
-  /* USER CODE END 2 */
-
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-    /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
-		ESP8266_STA_TCPClient_Test();//测试TCP通讯
-  }
-  /* USER CODE END 3 */
+        // 摩尔斯电码每5秒闪一次
+        if(now - last_morse_tick >= 5000)
+        {
+            morse_send("SOS");
+            last_morse_tick = now;
+        }
+    }
 }
 
-/**
-  * @brief System Clock Configuration
-  * @retval None
-  */
+/* ================== Morse LED ================== */
+void breathe_led_smooth(uint32_t duration)
+{
+    uint32_t step_delay = duration/(2*BREATH_STEPS);
+    for(int i=0;i<BREATH_STEPS;i++)
+    {
+        HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_SET);
+        HAL_Delay(step_delay);
+        HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_RESET);
+        HAL_Delay(step_delay);
+    }
+    for(int i=BREATH_STEPS;i>0;i--)
+    {
+        HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_SET);
+        HAL_Delay(step_delay);
+        HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_RESET);
+        HAL_Delay(step_delay);
+    }
+}
+
+void morse_dot(void)
+{
+    breathe_led_smooth(DOT_DURATION);
+    HAL_Delay(SYMBOL_SPACE);
+}
+
+void morse_dash(void)
+{
+    breathe_led_smooth(DASH_DURATION);
+    HAL_Delay(SYMBOL_SPACE);
+}
+
+void morse_send(const char *text)
+{
+    while(*text)
+    {
+        if(*text == ' ') HAL_Delay(WORD_SPACE);
+        else
+        {
+            const char *code = get_morse(*text);
+            while(*code)
+            {
+                if(*code == '.') morse_dot();
+                else if(*code == '-') morse_dash();
+                code++;
+            }
+            HAL_Delay(LETTER_SPACE-SYMBOL_SPACE);
+        }
+        text++;
+    }
+}
+
+/* ================== System Clock ================== */
 void SystemClock_Config(void)
 {
-  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+    RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+    RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-  /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+    RCC_OscInitStruct.HSEState       = RCC_HSE_ON;
+    RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
+    RCC_OscInitStruct.HSIState       = RCC_HSI_ON;
+    RCC_OscInitStruct.PLL.PLLState   = RCC_PLL_ON;
+    RCC_OscInitStruct.PLL.PLLSource  = RCC_PLLSOURCE_HSE;
+    RCC_OscInitStruct.PLL.PLLMUL     = RCC_PLL_MUL9;
+    if(HAL_RCC_OscConfig(&RCC_OscInitStruct)!=HAL_OK) Error_Handler();
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
+    RCC_ClkInitStruct.ClockType      = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK|
+                                       RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+    RCC_ClkInitStruct.SYSCLKSource   = RCC_SYSCLKSOURCE_PLLCLK;
+    RCC_ClkInitStruct.AHBCLKDivider  = RCC_SYSCLK_DIV1;
+    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
+    RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+    if(HAL_RCC_ClockConfig(&RCC_ClkInitStruct,FLASH_LATENCY_2)!=HAL_OK) Error_Handler();
 }
 
-/* USER CODE BEGIN 4 */
-
-/* USER CODE END 4 */
-
-/**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
+/* ================== Error Handler ================== */
 void Error_Handler(void)
 {
-  /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-
-  /* USER CODE END Error_Handler_Debug */
+    while(1)
+    {
+        HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_4);
+        HAL_Delay(200);
+    }
 }
-
-#ifdef  USE_FULL_ASSERT
-/**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
-void assert_failed(uint8_t *file, uint32_t line)
-{
-  /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     tex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
-  /* USER CODE END 6 */
-}
-#endif /* USE_FULL_ASSERT */
-
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
