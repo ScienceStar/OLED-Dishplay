@@ -1,48 +1,45 @@
 #include "tcp.h"
-#include "usart.h"
 #include "esp8266.h"
-#include <stdio.h>
-#include <string.h>
-#include "main.h"
 
 volatile uint8_t TcpClosedFlag = 0;
 
-void ESP8266_STA_TCPClient_Test(void)
+typedef enum {
+    TCP_IDLE,
+    TCP_WIFI,
+    TCP_CONNECT,
+    TCP_WORK
+} TCP_STATE;
+
+static TCP_STATE tcp_state = TCP_IDLE;
+
+void TCP_Task(void)
 {
-    u8 res;
-    char str[100] = {0};
+    static uint32_t tick = 0;
 
-    ESP8266_AT_Test();
-    printf("正在配置ESP8266\r\n");
-    ESP8266_Net_Mode_Choose(STA);
-    while(!ESP8266_JoinAP(User_ESP8266_SSID, User_ESP8266_PWD));
-    ESP8266_Enable_MultipleId(DISABLE);
-    while(!ESP8266_Link_Server(enumTCP, User_ESP8266_TCPServer_IP, User_ESP8266_TCPServer_PORT, Single_ID_0));
-    while(!ESP8266_UnvarnishSend());
-    printf("\r\n配置完成");
+    if(HAL_GetTick() - tick < 1000) return;
+    tick = HAL_GetTick();
 
-    while(1)
+    switch(tcp_state)
     {
-        sprintf(str,"杭州光子物联科技有限公司");
-        ESP8266_SendString(ENABLE, str, 0, Single_ID_0);
-        HAL_Delay(200);
-        Uart_RecvFlag();
+        case TCP_IDLE:
+            if(ESP8266_AT_Test())
+                tcp_state = TCP_WIFI;
+            break;
 
-        if(TcpClosedFlag)
-        {
-            ESP8266_ExitUnvarnishSend();
-            do { res = ESP8266_Get_LinkStatus(); } while(!res);
-            if(res == 4)
-            {
-                while(!ESP8266_JoinAP(User_ESP8266_SSID, User_ESP8266_PWD));
-                while(!ESP8266_Link_Server(enumTCP, User_ESP8266_TCPServer_IP, User_ESP8266_TCPServer_PORT, Single_ID_0));
-            }
-            while(!ESP8266_UnvarnishSend());
-        }
+        case TCP_WIFI:
+            if(ESP8266_SetMode(STA) &&
+               ESP8266_JoinAP(WIFI_SSID, WIFI_PWD))
+                tcp_state = TCP_CONNECT;
+            break;
+
+        case TCP_CONNECT:
+            if(ESP8266_TCP_Connect(TCP_SERVER_IP, TCP_SERVER_PORT) &&
+               ESP8266_TCP_EnterTransparent())
+                tcp_state = TCP_WORK;
+            break;
+
+        case TCP_WORK:
+            ESP8266_TCP_Send("杭州光子物联科技有限公司\r\n");
+            break;
     }
-}
-
-void TCP_ProcessData(uint8_t *data, uint16_t len)
-{
-    printf("TCP Received (%d bytes): %.*s\n", len, len, data);
 }
