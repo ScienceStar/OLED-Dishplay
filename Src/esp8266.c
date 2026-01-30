@@ -99,3 +99,12 @@ void ESP8266_TCP_ExitTransparent(void)
     esp8266_send("+++");
     HAL_Delay(500);
 }
+
+void ESP8266_SendString(const char *str)
+{
+    while(*str)
+    {
+        HAL_UART_Transmit(&huart2, (uint8_t*)str, 1, 100);
+        str++;
+    }
+}

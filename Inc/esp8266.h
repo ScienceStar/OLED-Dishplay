@@ -29,6 +29,7 @@ bool ESP8266_TCP_Connect(char *ip, uint16_t port);
 bool ESP8266_TCP_Send(char *data);
 bool ESP8266_TCP_EnterTransparent(void);
 void ESP8266_TCP_ExitTransparent(void);
+void ESP8266_SendString(const char *str);
 
 /* ================= ¹¤¾ß ================= */
 void ESP8266_ClearRx(void);
