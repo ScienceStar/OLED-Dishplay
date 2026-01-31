@@ -20,6 +20,7 @@ static uint32_t last_tick = 0;
 /* 循环发送控制 */
 static uint32_t last_send_tick = 0;
 #define TCP_SEND_INTERVAL 1000 // 每1000ms发送一次
+static uint32_t last_heartbeat_tick = 0;
 void TCP_Task(void)
 {
     uint32_t now = HAL_GetTick();
@@ -96,5 +97,18 @@ void TCP_Send_Loop(void)
     {
         ESP8266_TCP_Send("Loop message from STM32\r\n");
         last_send_tick = now;
+    }
+}
+
+/* ========== 心跳包 ========== */
+void TCP_Heartbeat(void)
+{
+    uint32_t now = HAL_GetTick();
+    if(tcp_state != TCP_WORK) return;
+
+    if(now - last_heartbeat_tick >= 2000) // 每2秒心跳
+    {
+        ESP8266_TCP_Send("PING\r\n");
+        last_heartbeat_tick = now;
     }
 }

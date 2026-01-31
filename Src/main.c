@@ -148,6 +148,7 @@ int main(void)
         if (WiFiStatus && !TcpClosedFlag)
         {
             TCP_Send_Loop();
+            TCP_Heartbeat();   // 心跳包，保持连接
         }
 
         /* ---------- UART接收ESP8266数据 ---------- */

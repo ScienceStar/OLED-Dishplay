@@ -10,4 +10,5 @@
 void TCP_Task(void);
 void TCP_Send_Test(void);
 void TCP_Send_Loop(void);
+void TCP_Heartbeat(void);
 #endif
