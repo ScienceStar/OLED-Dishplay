@@ -34,5 +34,6 @@ void ESP8266_SendString(const char *str);
 /* ================= ¹¤¾ß ================= */
 void ESP8266_ClearRx(void);
 bool ESP8266_WaitReply(char *ack, uint32_t timeout);
+void ESP8266_SendString(const char *str);
 
 #endif

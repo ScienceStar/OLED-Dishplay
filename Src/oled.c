@@ -132,6 +132,20 @@ void OLED_ShowString(u8 x,u8 y,u8 *chr)
 			j++;
 	}
 }
+// 显示小号字符串（6x8 字体），每字符宽度6像素
+void OLED_ShowStringSmall(u8 x,u8 y,u8 *chr)
+{
+	unsigned char j=0;
+	while (chr[j]!='\0')
+	{
+		unsigned char c = chr[j]-' ';
+		OLED_Set_Pos(x,y+1);
+		for(int i=0;i<6;i++) OLED_WR_Byte(F6x8[c][i],OLED_DATA);
+		x += 6;
+		if(x>120){ x = 0; y += 2; }
+		j++;
+	}
+}
 //显示汉字
 void OLED_ShowCHinese(u8 x,u8 y,u8 no)
 {      			    

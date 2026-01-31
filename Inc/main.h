@@ -19,6 +19,9 @@ extern uint16_t UartRxLen;
 extern uint16_t UartRxTimer;
 extern uint16_t UartRxOKFlag;
 extern uint16_t UartIntRxLen;
+extern volatile uint8_t TcpClosedFlag;
+extern uint8_t WiFiStatus;
+extern int8_t WiFiRSSI;
 
 extern uint8_t Uart_RecvFlag(void);
 extern uint8_t UartRecv_Clear(void);
@@ -41,6 +44,8 @@ extern void OLED_ShowString(uint8_t x,uint8_t y,uint8_t *p);
 extern void ESP8266_Init(void);
 extern void ESP8266_STA_TCPClient_Test(void);
 extern void TCP_ProcessData(uint8_t *buf, uint16_t len);
+extern void TCP_Task(void);
+extern void esp8266_led_update(void);
 
 /* ================= System ================= */
 void SystemClock_Config(void);

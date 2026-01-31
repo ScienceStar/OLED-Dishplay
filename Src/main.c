@@ -3,10 +3,12 @@
 #include "oled.h"
 #include "usart.h"
 #include "esp8266.h"
+#include "esp8266_wifi_adapter.h"
 #include "tcp.h"
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>  // atoi
+#include <stdio.h>   // sprintf
 
 /* ================== Morse Config ================== */
 #define DOT_DURATION     300
@@ -101,6 +103,17 @@ int main(void)
     ESP8266_Init();
     HAL_UART_Receive_IT(&huart2, (uint8_t*)&UartRxData, 1);
 
+    /* ---------- 启动 WiFi 和 TCP（使用适配器） ---------- */
+    if(WiFi_begin(WIFI_SSID, WIFI_PWD))
+    {
+        WiFiStatus = 1;
+        TCP_begin(TCP_SERVER_IP, TCP_SERVER_PORT);
+    }
+    else
+    {
+        WiFiStatus = 0;
+    }
+
     int current_index = 0;
     uint32_t last_tick = HAL_GetTick();
     uint32_t last_morse_tick = HAL_GetTick();
@@ -111,11 +124,38 @@ int main(void)
     {
         uint32_t now = HAL_GetTick();
 
-        /* ---------- OLED显示个人传记 ---------- */
+        /* ---------- OLED显示个人传记 + WiFi/TCP状态 ---------- */
         if(now - last_tick >= 1000)
         {
             OLED_Clear();
-            OLED_ShowString(0,0,(uint8_t*)bio_lines[current_index]);
+            OLED_ShowString(0,1,(uint8_t*)bio_lines[current_index]);
+            
+            /* 右上角第一行显示WiFi强度和TCP连接状态 (合并显示) */
+            char status_str[16] = {0};
+            char wifi_char = 'X';  // WiFi离线
+            char tcp_char = 'x';   // TCP未连接
+            
+            // 获取WiFi信号强度字符
+            if(WiFiStatus == 1)
+            {
+                if(WiFiRSSI >= -50) wifi_char = '*';      // 强
+                else if(WiFiRSSI >= -70) wifi_char = '+'; // 中
+                else wifi_char = '.';                      // 弱
+            }
+            
+            // 获取TCP连接状态字符
+            if(!TcpClosedFlag && WiFiStatus)
+            {
+                tcp_char = 'T';  // TCP已连接
+            }
+            
+            // 组合显示状态 (合并到一行，居中显示)
+            sprintf(status_str, "W:%c T:%c", wifi_char, tcp_char);
+            int s_len = strlen(status_str);
+            int x_pos = (128 - s_len * 6) / 2; // 小号每字符宽度约6像素
+            if(x_pos < 0) x_pos = 0;
+            OLED_ShowStringSmall(x_pos, 0, (uint8_t*)status_str);
+            
             current_index++;
             if(current_index >= BIO_LINE_COUNT) current_index = 0;
             last_tick = now;
@@ -127,6 +167,9 @@ int main(void)
             morse_send("SOS");
             last_morse_tick = now;
         }
+
+        /* ---------- TCP任务管理 ---------- */
+        TCP_Task();
 
         /* ---------- UART接收ESP8266数据 ---------- */
         if(UartRxOKFlag == 0x55)
@@ -155,12 +198,12 @@ int main(void)
             last_led_tick = now;
         }
 
-        /* ---------- 每秒发送TCP测试文字 ---------- */
-        if(now - last_tcp_send_tick >= 1000)
+        /* ---------- 周期发送TCP测试数据 ---------- */
+        if(now - last_tcp_send_tick >= 2000)
         {
             if(WiFiStatus && !TcpClosedFlag)
             {
-                ESP8266_SendString("Hello Server\r\n");
+                TCP_send_str("Device Online\r\n");
             }
             last_tcp_send_tick = now;
         }

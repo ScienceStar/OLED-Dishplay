@@ -104,7 +104,7 @@ void ESP8266_SendString(const char *str)
 {
     while(*str)
     {
-        HAL_UART_Transmit(&huart2, (uint8_t*)str, 1, 100);
+        HAL_UART_Transmit(&ESP8266_UART, (uint8_t*)str, 1, 100);
         str++;
     }
 }
