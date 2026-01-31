@@ -147,7 +147,7 @@ int main(void)
         TCP_Task();
         if (WiFiStatus && !TcpClosedFlag)
         {
-            TCP_Send_Test();
+            TCP_Send_Loop();
         }
 
         /* ---------- UART接收ESP8266数据 ---------- */
