@@ -22,18 +22,17 @@ extern volatile uint8_t esp8266_rx_ok;
 void ESP8266_Init(void);
 bool ESP8266_AT_Test(void);
 bool ESP8266_SetMode(ESP8266_Mode mode);
-bool ESP8266_JoinAP(char *ssid, char *pwd);
+bool ESP8266_JoinAP(const char *ssid, const char *pwd);
 
 /* ================= TCP ================= */
-bool ESP8266_TCP_Connect(char *ip, uint16_t port);
-bool ESP8266_TCP_Send(char *data);
+bool ESP8266_TCP_Connect(const char *ip, uint16_t port);
+bool ESP8266_TCP_Send(const char *data);
 bool ESP8266_TCP_EnterTransparent(void);
 void ESP8266_TCP_ExitTransparent(void);
 void ESP8266_SendString(const char *str);
 
 /* ================= ¹¤¾ß ================= */
 void ESP8266_ClearRx(void);
-bool ESP8266_WaitReply(char *ack, uint32_t timeout);
-void ESP8266_SendString(const char *str);
+bool ESP8266_WaitReply(const char *ack, uint32_t timeout);
 
 #endif

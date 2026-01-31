@@ -8,5 +8,6 @@
 #define TCP_SERVER_PORT 8888                // ????????
 
 void TCP_Task(void);
+void TCP_Send_Test(void);
 
 #endif
