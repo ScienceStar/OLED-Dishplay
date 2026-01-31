@@ -89,8 +89,21 @@ bool ESP8266_TCP_EnterTransparent(void)
 
 bool ESP8266_TCP_Send(char *data)
 {
+    if(data == NULL) return false;
+    int len = strlen(data);
+    char cmd[32];
+    sprintf(cmd, "AT+CIPSEND=%d\r\n", len);
+    ESP8266_ClearRx();
+    esp8266_send(cmd);
+    /* 等待 '>' 提示发送 */
+    if(!ESP8266_WaitReply(">", 2000)) return false;
+
+    /* 发送数据本体 */
     esp8266_send(data);
-    return true;
+
+    /* 等待发送完成确认 */
+    if(ESP8266_WaitReply("SEND OK", 3000)) return true;
+    return false;
 }
 
 void ESP8266_TCP_ExitTransparent(void)
