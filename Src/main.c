@@ -107,7 +107,11 @@ int main(void)
     if(WiFi_begin(WIFI_SSID, WIFI_PWD))
     {
         WiFiStatus = 1;
-        TCP_begin(TCP_SERVER_IP, TCP_SERVER_PORT);
+        if(TCP_begin(TCP_SERVER_IP, TCP_SERVER_PORT))
+        {
+            /* 发送一次测试消息（UTF-8） */
+            TCP_send_str("欢迎来到嵌入式开发世界!\r\n");
+        }
     }
     else
     {
@@ -286,6 +290,22 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         if(UartRxIndex >= 1024) UartRxIndex = 0;
         UartIntRxLen = UartRxIndex;
         UartRxOKFlag = 0x55;
+
+        /* 也把接收到的数据追加到 esp8266 的接收缓冲，供 AT 驱动使用 */
+        extern uint8_t esp8266_rx_buf[];
+        extern uint16_t esp8266_rx_len;
+        extern volatile uint8_t esp8266_rx_ok;
+        if(esp8266_rx_len < ESP8266_RX_MAX)
+        {
+            esp8266_rx_buf[esp8266_rx_len++] = UartRxData;
+            /* 在遇到换行时标记一条完整回复 */
+            if(UartRxData == '\n' || UartRxData == '\r')
+            {
+                esp8266_rx_buf[esp8266_rx_len] = '\0';
+                esp8266_rx_ok = 1;
+            }
+        }
+
         HAL_UART_Receive_IT(&huart2,(uint8_t*)&UartRxData,1);
     }
 }
