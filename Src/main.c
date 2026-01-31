@@ -25,6 +25,7 @@ void morse_dash(void);
 void morse_send(const char *text);
 const char *get_morse(char c);
 void esp8266_led_update(void);
+void parse_wifi_rssi(const uint8_t *buf);
 
 /* ================== Morse Table ================== */
 typedef struct
@@ -79,7 +80,7 @@ volatile uint8_t UartRxData;
 uint8_t UartRxbuf[1024], UartIntRxbuf[1024];
 uint16_t UartRxIndex = 0, UartRxFlag = 0, UartRxLen = 0, UartRxOKFlag = 0, UartIntRxLen = 0;
 uint8_t WiFiStatus = 0; // 0=未连接, 1=已连接
-int8_t WiFiRSSI = 0;
+int8_t WiFiRSSI = -100;
 extern volatile uint8_t TcpClosedFlag;
 
 /* ================== Main ================== */
@@ -98,7 +99,6 @@ int main(void)
     uint32_t last_tick = HAL_GetTick();
     uint32_t last_morse_tick = HAL_GetTick();
     uint32_t last_led_tick = HAL_GetTick();
-    uint32_t last_tcp_send_tick = HAL_GetTick();
 
     while (1)
     {
@@ -159,14 +159,13 @@ int main(void)
             memcpy(UartRxbuf, UartIntRxbuf, UartIntRxLen);
             UartIntRxLen = 0;
 
+            /* ---------- WiFi Status ---------- */
             if (strstr((char *)UartRxbuf, "WIFI CONNECTED"))
                 WiFiStatus = 1;
             else if (strstr((char *)UartRxbuf, "WIFI DISCONNECTED"))
                 WiFiStatus = 0;
 
-            char *rssi_ptr = strstr((char *)UartRxbuf, "+CWJAP:");
-            if (rssi_ptr)
-                WiFiRSSI = atoi(rssi_ptr + 7);
+            parse_wifi_rssi(UartRxbuf);  // 修复 RSSI
 
             TcpClosedFlag = strstr((char *)UartRxbuf, "CLOSED\r\n") ? 1 : 0;
             UartRxIndex = 0;
@@ -234,6 +233,34 @@ void morse_send(const char *text)
     }
 }
 
+/* ================== Parse WiFi RSSI ================== */
+void parse_wifi_rssi(const uint8_t *buf)
+{
+    int rssi = -100;
+
+    /* 支持 +CWJAP:"SSID",-45 */
+    if (sscanf((const char *)buf, "+CWJAP:\"%*[^\"]\",%d", &rssi) == 1)
+    {
+        WiFiRSSI = (int8_t)rssi;
+        return;
+    }
+
+    /* 支持 +CWLAP:(3,"SSID",-55,"MAC",1) */
+    const char *c = strstr((const char *)buf, "+CWLAP:");
+    if (c)
+    {
+        if (sscanf(c, "+CWLAP:(%*d,\"%*[^\"]\",%d", &rssi) == 1)
+        {
+            WiFiRSSI = (int8_t)rssi;
+            return;
+        }
+    }
+
+    /* 默认 -100 */
+    WiFiRSSI = -100;
+}
+
+/* ================== ESP8266 LED ================== */
 void esp8266_led_update(void)
 {
     static uint32_t last_toggle_tick = 0;
@@ -241,22 +268,18 @@ void esp8266_led_update(void)
 
     if(WiFiStatus == 0)
     {
-        // 未连接 → 熄灭
         HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
         last_toggle_tick = now;
         return;
     }
 
-    // 已连接 → 根据信号强度闪烁
     if(WiFiRSSI >= -50)
     {
-        // 强信号 → 常亮
         HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
         last_toggle_tick = now;
     }
     else if(WiFiRSSI >= -70)
     {
-        // 中等信号 → 快闪 (周期100ms)
         if(now - last_toggle_tick >= 50)
         {
             HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
@@ -265,7 +288,6 @@ void esp8266_led_update(void)
     }
     else
     {
-        // 弱信号 → 慢闪 (周期400ms)
         if(now - last_toggle_tick >= 200)
         {
             HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
