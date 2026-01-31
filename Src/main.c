@@ -234,17 +234,43 @@ void morse_send(const char *text)
     }
 }
 
-/* ================== ESP8266 LED ================== */
 void esp8266_led_update(void)
 {
-    if (WiFiStatus == 0)
+    static uint32_t last_toggle_tick = 0;
+    uint32_t now = HAL_GetTick();
+
+    if(WiFiStatus == 0)
+    {
+        // 未连接 → 熄灭
         HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+        last_toggle_tick = now;
+        return;
+    }
+
+    // 已连接 → 根据信号强度闪烁
+    if(WiFiRSSI >= -50)
+    {
+        // 强信号 → 常亮
+        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+        last_toggle_tick = now;
+    }
+    else if(WiFiRSSI >= -70)
+    {
+        // 中等信号 → 快闪 (周期100ms)
+        if(now - last_toggle_tick >= 50)
+        {
+            HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+            last_toggle_tick = now;
+        }
+    }
     else
     {
-        if (WiFiRSSI >= -50)
-            HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-        else
-            HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+        // 弱信号 → 慢闪 (周期400ms)
+        if(now - last_toggle_tick >= 200)
+        {
+            HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+            last_toggle_tick = now;
+        }
     }
 }
 
