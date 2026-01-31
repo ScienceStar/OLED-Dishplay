@@ -146,6 +146,47 @@ void OLED_ShowStringSmall(u8 x,u8 y,u8 *chr)
 		j++;
 	}
 }
+
+// 中号字符串显示：使用 F8X16 的上半部分（每字符宽8，高8），适配中等字号
+void OLED_ShowStringMid(u8 x,u8 y,u8 *chr)
+{
+	unsigned char j = 0;
+	while(chr[j] != '\0')
+	{
+		unsigned char c = chr[j] - ' ';
+		OLED_Set_Pos(x, y);
+		/* F8X16 字体每字符占 16 字节：前 8 字节为上半部分 */
+		for(int i = 0; i < 8; i++)
+		{
+			OLED_WR_Byte(F8X16[c*16 + i], OLED_DATA);
+		}
+		x += 8;
+		if(x > 120) { x = 0; y += 1; } // 每行高度为 1 页（8 像素）
+		j++;
+	}
+}
+
+// 7x7 字体显示：基于 6x8 字模，去掉一行并增加一列间隔，使每字符宽7高7
+void OLED_ShowString7x7(u8 x,u8 y,u8 *chr)
+{
+	unsigned char j = 0;
+	while(chr[j] != '\0')
+	{
+		unsigned char c = chr[j] - ' ';
+		/* 目标为 7 像素高，使用 F6x8 的列数据并屏蔽一位以得到 7 高效果 */
+		OLED_Set_Pos(x, y+1);
+		for(int i = 0; i < 6; i++)
+		{
+			unsigned char col = F6x8[c][i] & 0x7F; /* 清除一位，视觉上为 7 高 */
+			OLED_WR_Byte(col, OLED_DATA);
+		}
+		/* 追加一列空白以使字符宽度为 7 */
+		OLED_WR_Byte(0x00, OLED_DATA);
+		x += 7;
+		if(x > 120) { x = 0; y += 1; }
+		j++;
+	}
+}
 //显示汉字
 void OLED_ShowCHinese(u8 x,u8 y,u8 no)
 {      			    

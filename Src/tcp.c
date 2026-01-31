@@ -52,8 +52,7 @@ void TCP_Task(void)
             break;
 
         case TCP_CONNECT:
-            if(ESP8266_TCP_Connect(TCP_SERVER_IP, TCP_SERVER_PORT) &&
-               ESP8266_TCP_EnterTransparent())
+            if(ESP8266_TCP_Connect(TCP_SERVER_IP, TCP_SERVER_PORT))
             {
                 tcp_state = TCP_WORK;
                 tcp_retry_count = 0;

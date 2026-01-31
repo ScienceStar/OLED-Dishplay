@@ -132,7 +132,8 @@ int main(void)
         if(now - last_tick >= 1000)
         {
             OLED_Clear();
-            OLED_ShowString(0,1,(uint8_t*)bio_lines[current_index]);
+            /* 使用 7x7 字号显示传记（每字符宽7高7） */
+            OLED_ShowStringSmall(0,1,(uint8_t*)bio_lines[current_index]);
             
             /* 右上角第一行显示WiFi强度和TCP连接状态 (合并显示) */
             char status_str[16] = {0};
@@ -193,6 +194,18 @@ int main(void)
 
             TcpClosedFlag = strstr((char*)UartRxbuf,"CLOSED\r\n") ? 1 : 0;
             UartRxIndex = 0;
+
+            /* 调试显示：把最近一次 AT/模块回复在 OLED 小字号上显示（截断到 63 字节） */
+            {
+                char dbg[64];
+                int dbg_len = (UartRxLen < 63) ? UartRxLen : 63;
+                if(dbg_len > 0)
+                {
+                    memcpy(dbg, UartRxbuf, dbg_len);
+                    dbg[dbg_len] = '\0';
+                    OLED_ShowStringSmall(0,4,(uint8_t*)dbg);
+                }
+            }
         }
 
         /* ---------- ESP8266 LED状态更新 ---------- */
@@ -298,8 +311,8 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         if(esp8266_rx_len < ESP8266_RX_MAX)
         {
             esp8266_rx_buf[esp8266_rx_len++] = UartRxData;
-            /* 在遇到换行时标记一条完整回复 */
-            if(UartRxData == '\n' || UartRxData == '\r')
+            /* 在遇到换行或 '>' 提示时标记一条完整回复，便于 AT 驱动的等待函数识别 */
+            if(UartRxData == '\n' || UartRxData == '\r' || UartRxData == '>')
             {
                 esp8266_rx_buf[esp8266_rx_len] = '\0';
                 esp8266_rx_ok = 1;
