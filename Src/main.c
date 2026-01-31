@@ -132,8 +132,8 @@ int main(void)
         if(now - last_tick >= 1000)
         {
             OLED_Clear();
-            /* 使用 7x7 字号显示传记（每字符宽7高7） */
-            OLED_ShowStringSmall(0,1,(uint8_t*)bio_lines[current_index]);
+            /* 使用小字号 6x8 显示传记，每行可显示 ~20 个字符，避免重叠和残缺 */
+            OLED_ShowStringSmall(0,2,(uint8_t*)bio_lines[current_index]);
             
             /* 右上角第一行显示WiFi强度和TCP连接状态 (合并显示) */
             char status_str[16] = {0};
