@@ -13,7 +13,7 @@ static void esp8266_send(const char *cmd)
     HAL_UART_Transmit(&ESP8266_UART, (uint8_t*)cmd, strlen(cmd), 1000);
 }
 
-/* ================= 初始化 ================= */
+/* ================= 接口实现 ================= */
 void ESP8266_Init(void)
 {
     HAL_Delay(1000);
@@ -41,7 +41,6 @@ bool ESP8266_WaitReply(const char *ack, uint32_t timeout)
     return false;
 }
 
-/* ================= AT指令 ================= */
 bool ESP8266_AT_Test(void)
 {
     ESP8266_ClearRx();
@@ -64,23 +63,21 @@ bool ESP8266_JoinAP(const char *ssid, const char *pwd)
     sprintf(cmd,"AT+CWJAP=\"%s\",\"%s\"\r\n",ssid,pwd);
     ESP8266_ClearRx();
     esp8266_send(cmd);
-    return ESP8266_WaitReply("WIFI CONNECTED", 10000);
+    // 兼容不同固件返回 OK 或 WIFI CONNECTED
+    return ESP8266_WaitReply("WIFI CONNECTED", 10000) || ESP8266_WaitReply("OK", 10000);
 }
 
-/* ================= TCP ================= */
 bool ESP8266_TCP_Connect(const char *ip, uint16_t port)
 {
     char cmd[80];
     sprintf(cmd, "AT+CIPSTART=\"TCP\",\"%s\",%d\r\n", ip, port);
-
     ESP8266_ClearRx();
     esp8266_send(cmd);
 
-    if (ESP8266_WaitReply("CONNECT", 5000)) return true;
-    if (ESP8266_WaitReply("ALREADY CONNECTED", 2000)) return true;
-    if (ESP8266_WaitReply("OK", 2000)) return true;
-
-    return false;
+    // 等待连接成功的多种情况
+    return ESP8266_WaitReply("CONNECT", 5000) ||
+           ESP8266_WaitReply("ALREADY CONNECTED", 2000) ||
+           ESP8266_WaitReply("OK", 2000);
 }
 
 bool ESP8266_TCP_Send(const char *data)
@@ -89,14 +86,15 @@ bool ESP8266_TCP_Send(const char *data)
     int len = strlen(data);
     char cmd[32];
     sprintf(cmd, "AT+CIPSEND=%d\r\n", len);
-
     ESP8266_ClearRx();
     esp8266_send(cmd);
 
     if(!ESP8266_WaitReply(">", 2000)) return false;
 
     esp8266_send(data);
-    return ESP8266_WaitReply("SEND OK", 3000);
+
+    if(ESP8266_WaitReply("SEND OK", 3000)) return true;
+    return false;
 }
 
 bool ESP8266_TCP_EnterTransparent(void)

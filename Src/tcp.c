@@ -1,7 +1,6 @@
 #include "tcp.h"
 #include "esp8266.h"
 #include "stm32f1xx_hal.h"
-#include <string.h>
 #include <stdio.h>
 
 volatile uint8_t TcpClosedFlag = 0;
@@ -20,7 +19,7 @@ static uint32_t last_tick = 0;
 void TCP_Task(void)
 {
     uint32_t now = HAL_GetTick();
-    if(now - last_tick < 1000) return;
+    if(now - last_tick < 500) return;
     last_tick = now;
 
     switch(tcp_state)
@@ -34,10 +33,13 @@ void TCP_Task(void)
             break;
 
         case TCP_WIFI:
-            if(ESP8266_SetMode(STA) && ESP8266_JoinAP(WIFI_SSID, WIFI_PWD))
+            if(ESP8266_SetMode(STA))
             {
-                tcp_state = TCP_CONNECT;
-                retry_count = 0;
+                if(ESP8266_JoinAP(WIFI_SSID, WIFI_PWD))
+                {
+                    tcp_state = TCP_CONNECT;
+                    retry_count = 0;
+                }
             }
             else if(++retry_count >= 3)
             {
