@@ -49,7 +49,7 @@ const char *get_morse(char c)
 }
 
 /* ================== UART & ESP8266 ================== */
-uint8_t UartRxData; // 修复：去掉 volatile
+uint8_t UartRxData;
 uint8_t UartRxbuf[1024], UartIntRxbuf[1024];
 uint16_t UartRxIndex = 0, UartRxFlag = 0, UartRxLen = 0, UartRxOKFlag = 0, UartIntRxLen = 0;
 volatile uint8_t WiFiStatus;
@@ -70,17 +70,15 @@ int main(void)
     OLED_Clear();
     ESP8266_Init();
 
-    HAL_UART_Receive_IT(&huart2, &UartRxData, 1); // 修复
+    HAL_UART_Receive_IT(&huart2, &UartRxData, 1);
 
     uint32_t last_morse_tick  = HAL_GetTick();
     uint32_t last_led_tick    = HAL_GetTick();
     uint32_t last_scroll_tick = HAL_GetTick();
 
-    /* 初始化格口显示 */
     CabinetView_Init();
 
     // MQTT 初始化
-    /* 初始化 MQTT */
     MQTT_Init(&mqttClient, "192.168.0.7", 1883, "STM32_Client1", "cabinet/status");
     MQTT_Connect(&mqttClient);
     MQTT_Subscribe(&mqttClient);
@@ -88,19 +86,23 @@ int main(void)
     while (1) {
         uint32_t now = HAL_GetTick();
 
-        /* ---------- 顶部WiFi/TCP状态显示 ---------- */
-        char status_str[16];
-        char wifi_char = 'X', tcp_char = 'x';
+        /* ---------- 顶部 WiFi / TCP / MQTT 状态 ---------- */
+        char status_str[24];
+        char wifi_char = 'X';
+        char tcp_char  = 'x';
+        char mqtt_char = 'X';
+
         if (WiFiStatus == 1) {
-            if (WiFiRSSI >= -50)
-                wifi_char = '*';
-            else if (WiFiRSSI >= -70)
-                wifi_char = '+';
-            else
-                wifi_char = '.';
+            if (WiFiRSSI >= -50)      wifi_char = '*';
+            else if (WiFiRSSI >= -70) wifi_char = '+';
+            else                      wifi_char = '.';
         }
+
         if (!TcpClosedFlag && WiFiStatus) tcp_char = 'T';
-        sprintf(status_str, "W:%c T:%c", wifi_char, tcp_char);
+
+        if (mqttClient.connected) mqtt_char = 'M';
+
+        sprintf(status_str, "W:%c T:%c M:%c", wifi_char, tcp_char, mqtt_char);
         OLED_ShowStringSmall((128 - strlen(status_str) * 6) / 2, 0, (uint8_t *)status_str);
 
         /* ---------- 摩尔斯电码任务 ---------- */
@@ -166,8 +168,11 @@ int main(void)
                 WiFiStatus = 0;
             char *rssi_ptr = strstr((char *)UartRxbuf, "+CWJAP:");
             if (rssi_ptr) WiFiRSSI = atoi(rssi_ptr + 7);
-            TcpClosedFlag = strstr((char *)UartRxbuf, "CLOSED\r\n") ? 1 : 0;
-            UartRxIndex   = 0;
+            if (strstr((char *)UartRxbuf, "CLOSED\r\n")) {
+                TcpClosedFlag = 1;
+                mqttClient.connected = false;  // TCP断开 → MQTT断开
+            }
+            UartRxIndex = 0;
         }
 
         /* ---------- ESP8266 LED ---------- */
@@ -193,8 +198,7 @@ int main(void)
 
         MQTT_SimulateIncomingMessage(&mqttClient, "{\"cell\":\"01\",\"open\":1,\"err\":0}");
 
-        // ESP8266 接收到 MQTT 消息后调用
-         MQTT_HandleIncomingData(&mqttClient, esp8266_rx_buf);
+        MQTT_HandleIncomingData(&mqttClient, esp8266_rx_buf);
 
         if (MQTT_MessageReceived(&mqttClient)) {
             printf("MQTT: %s\r\n", mqttClient.json_buf);
@@ -203,7 +207,7 @@ int main(void)
 
         /* ---------- OLED 滚动显示 ---------- */
         if (now - last_scroll_tick >= 300) {
-            CabinetView_ScrollTaskSmall(2); // 从第2行开始滚动显示格口信息
+            CabinetView_ScrollTaskSmall(2);
             last_scroll_tick = now;
         }
     }
