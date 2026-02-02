@@ -38,7 +38,15 @@ typedef struct {
     const char *morse;
 } MorseMap;
 MorseMap morse_table[] = {
-    {'A', ".-"}, {'B', "-..."}, {'C', "-.-."}, {'D', "-.."}, {'E', "."}, {'F', "..-."}, {'G', "--."}, {'H', "...."}, {'I', ".."}, {'J', ".---"}, {'K', "-.-"}, {'L', ".-.."}, {'M', "--"}, {'N', "-."}, {'O', "---"}, {'P', ".--."}, {'Q', "--.-"}, {'R', ".-."}, {'S', "..."}, {'T', "-"}, {'U', "..-"}, {'V', "...-"}, {'W', ".--"}, {'X', "-..-"}, {'Y', "-.--"}, {'Z', "--.."}, {'0', "-----"}, {'1', ".----"}, {'2', "..---"}, {'3', "...--"}, {'4', "....-"}, {'5', "....."}, {'6', "-...."}, {'7', "--..."}, {'8', "---.."}, {'9', "----."}, {' ', " "}};
+    {'A', ".-"}, {'B', "-..."}, {'C', "-.-."}, {'D', "-.."}, {'E', "."},
+    {'F', "..-."}, {'G', "--."}, {'H', "...."}, {'I', ".."}, {'J', ".---"},
+    {'K', "-.-"}, {'L', ".-.."}, {'M', "--"}, {'N', "-."}, {'O', "---"},
+    {'P', ".--."}, {'Q', "--.-"}, {'R', ".-."}, {'S', "..."}, {'T', "-"},
+    {'U', "..-"}, {'V', "...-"}, {'W', ".--"}, {'X', "-..-"}, {'Y', "-.--"},
+    {'Z', "--.."}, {'0', "-----"}, {'1', ".----"}, {'2', "..---"}, {'3', "...--"},
+    {'4', "....-"}, {'5', "....."}, {'6', "-...."}, {'7', "--..."}, {'8', "---.."},
+    {'9', "----."}, {' ', " "}
+};
 
 const char *get_morse(char c)
 {
@@ -52,12 +60,25 @@ const char *get_morse(char c)
 uint8_t UartRxData;
 uint8_t UartRxbuf[1024], UartIntRxbuf[1024];
 uint16_t UartRxIndex = 0, UartRxFlag = 0, UartRxLen = 0, UartRxOKFlag = 0, UartIntRxLen = 0;
-volatile uint8_t WiFiStatus;
+volatile uint8_t WiFiStatus;   // 0=断开,1=连接
 int8_t WiFiRSSI = 0;
 extern volatile uint8_t TcpClosedFlag;
 
 /* ================== MQTT 客户端 ================== */
 MQTT_Client mqttClient;
+
+/* ================== WiFi 自动重连 ================== */
+uint32_t wifi_reconnect_tick = 0;
+#define WIFI_RECONNECT_INTERVAL 5000
+
+void ESP_WiFi_ReconnectTask(void)
+{
+    uint32_t now = HAL_GetTick();
+    if (!WiFiStatus && now - wifi_reconnect_tick >= WIFI_RECONNECT_INTERVAL) {
+        wifi_reconnect_tick = now;
+        ESP8266_JoinAP(WIFI_SSID, WIFI_PWD); // 调用你的 esp8266.c 里连接 AP 的函数
+    }
+}
 
 /* ================== Main ================== */
 int main(void)
@@ -70,7 +91,7 @@ int main(void)
     OLED_Clear();
     ESP8266_Init();
 
-    HAL_UART_Receive_IT(&huart2, &UartRxData, 1);
+    HAL_UART_Receive_IT(&huart2, &UartRxData, 1); // 启动 UART 中断接收
 
     uint32_t last_morse_tick  = HAL_GetTick();
     uint32_t last_led_tick    = HAL_GetTick();
@@ -85,6 +106,9 @@ int main(void)
 
     while (1) {
         uint32_t now = HAL_GetTick();
+
+        /* ---------- WiFi 重连任务 ---------- */
+        ESP_WiFi_ReconnectTask();
 
         /* ---------- 顶部 WiFi / TCP / MQTT 状态 ---------- */
         char status_str[24];
@@ -102,7 +126,6 @@ int main(void)
         }
 
         if (!TcpClosedFlag && WiFiStatus) tcp_char = 'T';
-
         if (mqttClient.connected) mqtt_char = 'M';
 
         sprintf(status_str, "W:%c T:%c M:%c", wifi_char, tcp_char, mqtt_char);
@@ -130,13 +153,8 @@ int main(void)
                 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
                 HAL_Delay((uint32_t)(morse_state.duration * (1.0f - brightness)));
                 step += step_dir;
-                if (step >= BREATH_STEPS) {
-                    step_dir = -1;
-                    step     = BREATH_STEPS - 1;
-                } else if (step <= 0) {
-                    step_dir = 1;
-                    step     = 0;
-                }
+                if (step >= BREATH_STEPS) { step_dir = -1; step = BREATH_STEPS - 1; }
+                else if (step <= 0) { step_dir = 1; step = 0; }
 
                 static uint32_t symbol_delay_tick = 0;
                 static uint8_t symbol_delay_done  = 0;
@@ -173,7 +191,7 @@ int main(void)
             if (rssi_ptr) WiFiRSSI = atoi(rssi_ptr + 7);
             if (strstr((char *)UartRxbuf, "CLOSED\r\n")) {
                 TcpClosedFlag        = 1;
-                mqttClient.connected = false; // TCP断开 → MQTT断开
+                mqttClient.connected = false;
             }
             UartRxIndex = 0;
         }
@@ -195,45 +213,27 @@ int main(void)
             }
         }
 
-        /* ---------- MQTT模拟接收 ---------- */
-        /* strcpy(mqtt_json_buf, "{\"cellId\":\"01\",\"opened\":1,\"errro\":0}");
-        CabinetView_UpdateFromJson(mqtt_json_buf);
-
-        MQTT_SimulateIncomingMessage(&mqttClient, "{\"cellId\":\"01\",\"opened\":1,\"error\":0}");
-
-        MQTT_HandleIncomingData(&mqttClient, esp8266_rx_buf); */
-
-        /* 1. ESP8266 收包完成 */
+        /* ---------- MQTT处理 ---------- */
         if (esp8266_rx_ok) {
             esp8266_rx_ok = 0;
-
-            // 把串口数据喂给 MQTT
-            MQTT_HandleIncomingData(&mqttClient,
-                                    (char *)esp8266_rx_buf);
+            MQTT_HandleIncomingData(&mqttClient, (char *)esp8266_rx_buf);
         }
 
-        /* 2. MQTT 有新业务消息 */
         if (MQTT_MessageReceived(&mqttClient)) {
-
             char json_local[MQTT_JSON_BUF_LEN];
-            strncpy(json_local,
-                    mqttClient.json_buf,
-                    MQTT_JSON_BUF_LEN - 1);
+            strncpy(json_local, mqttClient.json_buf, MQTT_JSON_BUF_LEN - 1);
             json_local[MQTT_JSON_BUF_LEN - 1] = '\0';
-
             CabinetView_UpdateFromJson(json_local);
         }
 
-        /* 3. OLED 轮播（必须周期性执行） */
+        /* ---------- OLED 轮播 ---------- */
         CabinetView_ScrollTaskSmall(0);
-
-        HAL_Delay(30);
-
-        /* ---------- OLED 滚动显示 ---------- */
         if (now - last_scroll_tick >= 300) {
             CabinetView_RotateDisplay();
             last_scroll_tick = now;
         }
+
+        HAL_Delay(30);
     }
 }
 
@@ -241,34 +241,20 @@ int main(void)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart == &huart2) {
-        // 使用正确的缓冲区名称
         UartIntRxbuf[UartRxIndex++] = UartRxData;
         if (UartRxIndex >= 1024) UartRxIndex = 0;
         UartIntRxLen = UartRxIndex;
         UartRxFlag   = 0x55;
         UartRxOKFlag = 0x55;
 
-        extern uint8_t esp8266_rx_buf[];
-        extern uint16_t esp8266_rx_len;
-        extern volatile uint8_t esp8266_rx_ok;
-
         if (esp8266_rx_len < ESP8266_RX_MAX) {
             esp8266_rx_buf[esp8266_rx_len++] = UartRxData;
-
-            // 判断一条完整消息
             if (UartRxData == '\n' || UartRxData == '\r' || UartRxData == '>') {
                 esp8266_rx_buf[esp8266_rx_len] = '\0';
                 esp8266_rx_ok                  = 1;
-
-                // 收到完整 MQTT 消息立即处理，强制类型转换
-                MQTT_HandleIncomingData(&mqttClient, (const char *)esp8266_rx_buf);
-
-                // 重置接收长度
-                esp8266_rx_len = 0;
+                esp8266_rx_len                  = 0;
             }
         }
-
-        // 继续接收下一个字节
         HAL_UART_Receive_IT(&huart2, &UartRxData, 1);
     }
 }

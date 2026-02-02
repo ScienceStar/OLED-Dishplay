@@ -2,7 +2,7 @@
 #define __TCP_H
 
 #define WIFI_SSID   "TP-LINK_F643"   // ?? 2.4G
-#define WIFI_PWD    "Vast314&Star159$"
+#define WIFI_PWD    "3141592654"
 
 #define TCP_SERVER_IP   "192.168.0.7"      // ??????/???IP
 #define TCP_SERVER_PORT 8888                // ????????
