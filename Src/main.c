@@ -18,6 +18,10 @@
 #define WORD_SPACE (DOT_DURATION*7)
 #define BREATH_STEPS 10
 
+/* ===================MQTT参数================================= */
+#define MQTT_JSON_BUF_LEN 128
+char mqtt_json_buf[MQTT_JSON_BUF_LEN] = {0};
+
 /* ================== Morse状态机 ================== */
 typedef struct {
     const char *code;
@@ -159,6 +163,13 @@ int main(void)
             else if(WiFiRSSI>=-70 && now-last_toggle_tick>=50){HAL_GPIO_TogglePin(GPIOC,GPIO_PIN_13);last_toggle_tick=now;}
             else if(WiFiRSSI<-70 && now-last_toggle_tick>=200){HAL_GPIO_TogglePin(GPIOC,GPIO_PIN_13);last_toggle_tick=now;}
         }
+
+        /* ---------- MQTT模拟接收 ---------- */
+        // 如果你的 MQTT 有回调，可以在回调中调用 CabinetView_UpdateFromJson()
+        // 这里模拟从 mqtt_json_buf 获取格口状态
+        // 例如：
+         strcpy(mqtt_json_buf, "{\"cell\":\"01\",\"open\":1,\"err\":0}");
+         CabinetView_UpdateFromJson(mqtt_json_buf);
 
         /* ---------- OLED 滚动显示 ---------- */
         if(now - last_scroll_tick >= 300){
