@@ -1,64 +1,61 @@
 #include "main.h"
-#include "oled.h"
 #include "esp8266.h"
+#include "gpio.h"
+#include "oled.h"
+#include "tcp.h"
+#include "usart.h"
 #include "cabinet_view.h"
-#include "string.h"
+#include <stdint.h>
 #include <stdio.h>
-#include <math.h>  // 用于正弦渐变
+#include <stdlib.h>
+#include <string.h>
 
-#ifndef M_PI
-#define M_PI 3.14159265f
-#endif
+/* ================== Morse Config ================== */
+#define DOT_DURATION 300
+#define DASH_DURATION (DOT_DURATION*3)
+#define SYMBOL_SPACE DOT_DURATION
+#define LETTER_SPACE (DOT_DURATION*3)
+#define WORD_SPACE (DOT_DURATION*7)
+#define BREATH_STEPS 10
 
-/* ================== Morse LED Config ================== */
-#define DOT_DURATION  300
-#define DASH_DURATION (DOT_DURATION * 3)
-#define SYMBOL_SPACE  DOT_DURATION
-#define LETTER_SPACE  (DOT_DURATION * 3)
-#define WORD_SPACE    (DOT_DURATION * 7)
-#define BREATH_STEPS  50 // 渐变步数，越多越平滑
-
-/* ================== UART / MQTT Buffers ================== */
-extern char mqtt_rx_buf[256];    // ESP8266 MQTT payload
-volatile uint8_t WiFiStatus = 0; // 0=未连接,1=已连接
-int8_t WiFiRSSI             = -100;
-extern volatile uint8_t TcpClosedFlag;
-extern UART_HandleTypeDef huart2;
-
-/* ================== Function Prototypes ================== */
-void SystemClock_Config(void);
-static void MX_GPIO_Init(void);
-static void MX_USART2_UART_Init(void);
-void breathe_led_smooth(uint32_t duration);
-void morse_dot(void);
-void morse_dash(void);
-void morse_send(const char *text);
-const char *get_morse(char c);
-void esp8266_led_update(void);
+/* ================== Morse状态机 ================== */
+typedef struct {
+    const char *code;
+    uint8_t index;
+    uint8_t busy;
+    uint32_t duration;
+} MorseState;
+MorseState morse_state = {0};
 
 /* ================== Morse Table ================== */
 typedef struct {
     char c;
     const char *morse;
 } MorseMap;
-
 MorseMap morse_table[] = {
-    {'A', ".-"}, {'B', "-..."}, {'C', "-.-."}, {'D', "-.."}, {'E', "."}, {'F', "..-."}, 
-    {'G', "--."}, {'H', "...."}, {'I', ".."}, {'J', ".---"}, {'K', "-.-"}, {'L', ".-.."}, 
-    {'M', "--"}, {'N', "-."}, {'O', "---"}, {'P', ".--."}, {'Q', "--.-"}, {'R', ".-."}, 
-    {'S', "..."}, {'T', "-"}, {'U', "..-"}, {'V', "...-"}, {'W', ".--"}, {'X', "-..-"}, 
-    {'Y', "-.--"}, {'Z', "--.."}, {'0', "-----"}, {'1', ".----"}, {'2', "..---"}, 
-    {'3', "...--"}, {'4', "....-"}, {'5', "....."}, {'6', "-...."}, {'7', "--..."}, 
+    {'A', ".-"}, {'B', "-..."}, {'C', "-.-."}, {'D', "-.."}, {'E', "."}, {'F', "..-."},
+    {'G', "--."}, {'H', "...."}, {'I', ".."}, {'J', ".---"}, {'K', "-.-"}, {'L', ".-.."},
+    {'M', "--"}, {'N', "-."}, {'O', "---"}, {'P', ".--."}, {'Q', "--.-"}, {'R', ".-."},
+    {'S', "..."}, {'T', "-"}, {'U', "..-"}, {'V', "...-"}, {'W', ".--"}, {'X', "-..-"},
+    {'Y', "-.--"}, {'Z', "--.."}, {'0', "-----"}, {'1', ".----"}, {'2', "..---"},
+    {'3', "...--"}, {'4', "....-"}, {'5', "....."}, {'6', "-...."}, {'7', "--..."},
     {'8', "---.."}, {'9', "----."}, {' ', " "}
 };
 
-const char *get_morse(char c)
-{
-    if (c >= 'a' && c <= 'z') c -= 32;
-    for (int i = 0; i < sizeof(morse_table) / sizeof(MorseMap); i++)
-        if (morse_table[i].c == c) return morse_table[i].morse;
+const char *get_morse(char c) {
+    if(c>='a' && c<='z') c -= 32;
+    for(int i=0;i<sizeof(morse_table)/sizeof(MorseMap);i++)
+        if(morse_table[i].c==c) return morse_table[i].morse;
     return "";
 }
+
+/* ================== UART & ESP8266 ================== */
+volatile uint8_t UartRxData;
+uint8_t UartRxbuf[1024], UartIntRxbuf[1024];
+uint16_t UartRxIndex=0,UartRxFlag=0,UartRxLen=0,UartRxOKFlag=0,UartIntRxLen=0;
+volatile uint8_t WiFiStatus;
+int8_t WiFiRSSI = 0;
+extern volatile uint8_t TcpClosedFlag;
 
 /* ================== Main ================== */
 int main(void)
@@ -67,167 +64,157 @@ int main(void)
     SystemClock_Config();
     MX_GPIO_Init();
     MX_USART2_UART_Init();
-
     OLED_Init();
     OLED_Clear();
-    uint8_t boot_msg[] = "Booting...";
-    OLED_ShowString(0, 0, boot_msg);
-    OLED_Refresh();  // 刷新显示
-
     ESP8266_Init();
-    ESP8266_MQTT_Init();
+    HAL_UART_Receive_IT(&huart2, &UartRxData, 1);
+
+    uint32_t last_morse_tick = HAL_GetTick();
+    uint32_t last_led_tick = HAL_GetTick();
+    uint32_t last_scroll_tick = HAL_GetTick();
+
+    /* 初始化格口显示 */
     CabinetView_Init();
 
-    uint32_t last_oled_tick  = HAL_GetTick();
-    uint32_t last_morse_tick = HAL_GetTick();
-
-    while (1) {
+    while(1)
+    {
         uint32_t now = HAL_GetTick();
 
-        /* ---------- MQTT数据处理 ---------- */
-        if (ESP8266_MQTT_HasMsg()) {
-            char *json = ESP8266_MQTT_GetPayload();
-            if (json) CabinetView_UpdateFromJson(json);
+        /* ---------- 顶部WiFi/TCP状态显示 ---------- */
+        char status_str[16];
+        char wifi_char='X',tcp_char='x';
+        if(WiFiStatus==1){
+            if(WiFiRSSI>=-50) wifi_char='*';
+            else if(WiFiRSSI>=-70) wifi_char='+';
+            else wifi_char='.';
         }
+        if(!TcpClosedFlag && WiFiStatus) tcp_char='T';
+        sprintf(status_str,"W:%c T:%c",wifi_char,tcp_char);
+        OLED_ShowStringSmall((128-strlen(status_str)*6)/2,0,(uint8_t*)status_str);
 
-        /* ---------- OLED滚动显示 ---------- */
-        if (now - last_oled_tick >= 300) {
-            CabinetView_ScrollTask();
-            last_oled_tick = now;
-        }
-
-        /* ---------- 摩尔斯呼吸灯 ---------- */
-        if (now - last_morse_tick >= 5000) {
-            morse_send("SOS");
+        /* ---------- 摩尔斯电码任务 ---------- */
+        if(now - last_morse_tick >= 5000){
+            morse_state.code = get_morse('S');
+            morse_state.index=0;
+            morse_state.busy=1;
+            morse_state.duration=DOT_DURATION;
             last_morse_tick = now;
         }
-
-        /* ---------- ESP8266 LED状态 ---------- */
-        esp8266_led_update();
-    }
-}
-
-/* ================== Morse LED Functions ================== */
-void breathe_led_smooth(uint32_t duration)
-{
-    // 软件PWM，正弦渐变
-    for (int step = 0; step < BREATH_STEPS; step++) {
-        float brightness = sinf(M_PI * step / (BREATH_STEPS - 1)); // 0~1
-        if (brightness < 0.05f) brightness = 0.05f;                // 保底亮度
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
-        HAL_Delay(duration * brightness);
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
-        HAL_Delay(duration * (1.0f - brightness));
-    }
-}
-
-void morse_dot(void)
-{
-    breathe_led_smooth(DOT_DURATION);
-    HAL_Delay(SYMBOL_SPACE);
-}
-
-void morse_dash(void)
-{
-    breathe_led_smooth(DASH_DURATION);
-    HAL_Delay(SYMBOL_SPACE);
-}
-
-void morse_send(const char *text)
-{
-    while (*text) {
-        if (*text == ' ')
-            HAL_Delay(WORD_SPACE);
-        else {
-            const char *code = get_morse(*text);
-            while (*code) {
-                if (*code == '.')
-                    morse_dot();
-                else if (*code == '-')
-                    morse_dash();
-                code++;
+        if(morse_state.busy) {
+            static uint32_t step_tick=0;
+            static int8_t step_dir=1;
+            static uint8_t step=0;
+            if(now - step_tick >= 10){
+                step_tick=now;
+                float brightness = (float)step/BREATH_STEPS;
+                if(brightness<0.05f) brightness=0.05f;
+                HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_SET);
+                HAL_Delay((uint32_t)(morse_state.duration*brightness));
+                HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_RESET);
+                HAL_Delay((uint32_t)(morse_state.duration*(1.0f-brightness)));
+                step += step_dir;
+                if(step >= BREATH_STEPS){step_dir=-1;step=BREATH_STEPS-1;}
+                else if(step<=0){step_dir=1;step=0;}
+                static uint32_t symbol_delay_tick=0;
+                static uint8_t symbol_delay_done=0;
+                if(!symbol_delay_done && step==0){
+                    symbol_delay_done=1;
+                    symbol_delay_tick=HAL_GetTick();
+                }
+                if(symbol_delay_done && HAL_GetTick()-symbol_delay_tick>=SYMBOL_SPACE){
+                    morse_state.index++;
+                    symbol_delay_done=0;
+                    if(morse_state.code[morse_state.index]=='\0') morse_state.busy=0;
+                }
             }
-            HAL_Delay(LETTER_SPACE - SYMBOL_SPACE);
         }
-        text++;
+
+        /* ---------- TCP任务 ---------- */
+        TCP_Task();
+        if(WiFiStatus && !TcpClosedFlag){
+            TCP_Send_Loop();
+            TCP_Heartbeat();
+        }
+
+        /* ---------- UART接收ESP8266 ---------- */
+        if(UartRxOKFlag==0x55){
+            UartRxOKFlag=0;
+            UartRxLen=UartIntRxLen;
+            memcpy(UartRxbuf,UartIntRxbuf,UartIntRxLen);
+            UartIntRxLen=0;
+            if(strstr((char*)UartRxbuf,"WIFI CONNECTED")) WiFiStatus=1;
+            else if(strstr((char*)UartRxbuf,"WIFI DISCONNECTED")) WiFiStatus=0;
+            char *rssi_ptr=strstr((char*)UartRxbuf,"+CWJAP:");
+            if(rssi_ptr) WiFiRSSI=atoi(rssi_ptr+7);
+            TcpClosedFlag = strstr((char*)UartRxbuf,"CLOSED\r\n")?1:0;
+            UartRxIndex=0;
+        }
+
+        /* ---------- ESP8266 LED ---------- */
+        static uint32_t last_toggle_tick=0;
+        if(now - last_led_tick >= 50){
+            last_led_tick=now;
+            if(WiFiStatus==0) HAL_GPIO_WritePin(GPIOC,GPIO_PIN_13,GPIO_PIN_SET);
+            else if(WiFiRSSI>=-50) HAL_GPIO_WritePin(GPIOC,GPIO_PIN_13,GPIO_PIN_RESET);
+            else if(WiFiRSSI>=-70 && now-last_toggle_tick>=50){HAL_GPIO_TogglePin(GPIOC,GPIO_PIN_13);last_toggle_tick=now;}
+            else if(WiFiRSSI<-70 && now-last_toggle_tick>=200){HAL_GPIO_TogglePin(GPIOC,GPIO_PIN_13);last_toggle_tick=now;}
+        }
+
+        /* ---------- OLED 滚动显示 ---------- */
+        if(now - last_scroll_tick >= 300){
+            CabinetView_ScrollTaskSmall(2); // 从第2行开始滚动显示格口信息
+            last_scroll_tick = now;
+        }
     }
 }
 
-/* ================== ESP8266 LED Update ================== */
-void esp8266_led_update(void)
-{
-    static uint32_t last_toggle_tick = 0;
-    uint32_t now                     = HAL_GetTick();
-
-    if (WiFiStatus == 0) {
-        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-        last_toggle_tick = now;
-        return;
+/* ================== UART回调 ================== */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
+    if(huart==&huart2){
+        UartRxFlag=0x55;
+        UartIntRxbuf[UartRxIndex++]=UartRxData;
+        if(UartRxIndex>=1024) UartRxIndex=0;
+        UartIntRxLen=UartRxIndex;
+        UartRxOKFlag=0x55;
+        extern uint8_t esp8266_rx_buf[];
+        extern uint16_t esp8266_rx_len;
+        extern volatile uint8_t esp8266_rx_ok;
+        if(esp8266_rx_len<ESP8266_RX_MAX){
+            esp8266_rx_buf[esp8266_rx_len++]=UartRxData;
+            if(UartRxData=='\n'||UartRxData=='\r'||UartRxData=='>'){
+                esp8266_rx_buf[esp8266_rx_len]='\0';
+                esp8266_rx_ok=1;
+            }
+        }
+        HAL_UART_Receive_IT(&huart2,&UartRxData,1);
     }
-
-    if (WiFiRSSI >= -50)
-        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-    else if (WiFiRSSI >= -70 && (now - last_toggle_tick) >= 50) {
-        HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-        last_toggle_tick = now;
-    } else if (WiFiRSSI < -70 && (now - last_toggle_tick) >= 200) {
-        HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-        last_toggle_tick = now;
-    }
-}
-
-/* ================== Peripheral Init ================== */
-static void MX_USART2_UART_Init(void)
-{
-    huart2.Instance          = USART2;
-    huart2.Init.BaudRate     = 115200;
-    huart2.Init.WordLength   = UART_WORDLENGTH_8B;
-    huart2.Init.StopBits     = UART_STOPBITS_1;
-    huart2.Init.Parity       = UART_PARITY_NONE;
-    huart2.Init.Mode         = UART_MODE_TX_RX;
-    huart2.Init.HwFlowCtl    = UART_HWCONTROL_NONE;
-    huart2.Init.OverSampling = UART_OVERSAMPLING_16;
-
-    if (HAL_UART_Init(&huart2) != HAL_OK)
-        Error_Handler();
-}
-
-static void MX_GPIO_Init(void)
-{
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-    __HAL_RCC_GPIOC_CLK_ENABLE();
 }
 
 /* ================== System Clock ================== */
-void SystemClock_Config(void)
-{
-    RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-    RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-
-    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-    RCC_OscInitStruct.HSEState       = RCC_HSE_ON;
-    RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
-    RCC_OscInitStruct.PLL.PLLState   = RCC_PLL_ON;
-    RCC_OscInitStruct.PLL.PLLSource  = RCC_PLLSOURCE_HSE;
-    RCC_OscInitStruct.PLL.PLLMUL     = RCC_PLL_MUL9;
-
-    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) Error_Handler();
-
-    RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK |
-                                  RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
-    RCC_ClkInitStruct.SYSCLKSource   = RCC_SYSCLKSOURCE_PLLCLK;
-    RCC_ClkInitStruct.AHBCLKDivider  = RCC_SYSCLK_DIV1;
-    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-    RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
-    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) Error_Handler();
+void SystemClock_Config(void){
+    RCC_OscInitTypeDef RCC_OscInitStruct={0};
+    RCC_ClkInitTypeDef RCC_ClkInitStruct={0};
+    RCC_OscInitStruct.OscillatorType=RCC_OSCILLATORTYPE_HSE;
+    RCC_OscInitStruct.HSEState=RCC_HSE_ON;
+    RCC_OscInitStruct.HSEPredivValue=RCC_HSE_PREDIV_DIV1;
+    RCC_OscInitStruct.HSIState=RCC_HSI_ON;
+    RCC_OscInitStruct.PLL.PLLState=RCC_PLL_ON;
+    RCC_OscInitStruct.PLL.PLLSource=RCC_PLLSOURCE_HSE;
+    RCC_OscInitStruct.PLL.PLLMUL=RCC_PLL_MUL9;
+    HAL_RCC_OscConfig(&RCC_OscInitStruct);
+    RCC_ClkInitStruct.ClockType=RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK|
+                                RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+    RCC_ClkInitStruct.SYSCLKSource=RCC_SYSCLKSOURCE_PLLCLK;
+    RCC_ClkInitStruct.AHBCLKDivider=RCC_SYSCLK_DIV1;
+    RCC_ClkInitStruct.APB1CLKDivider=RCC_HCLK_DIV2;
+    RCC_ClkInitStruct.APB2CLKDivider=RCC_HCLK_DIV1;
+    HAL_RCC_ClockConfig(&RCC_ClkInitStruct,FLASH_LATENCY_2);
 }
 
 /* ================== Error Handler ================== */
-void Error_Handler(void)
-{
-    __disable_irq();
-    while (1) {
-        HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_4);
+void Error_Handler(void){
+    while(1){
+        HAL_GPIO_TogglePin(GPIOB,GPIO_PIN_4);
         HAL_Delay(200);
     }
 }
