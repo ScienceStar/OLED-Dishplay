@@ -271,31 +271,21 @@ void OLED_Init(void)
 	OLED_WR_Byte(0xAF,OLED_CMD); /*display ON*/ 
 	OLED_Clear();
 	OLED_Set_Pos(0,0); 	
-}  
+} 
 
+/**
+ * @brief 显示智能柜格口状态（两行）
+ * 示例：
+ *  line1: "Cell-01 Open:3"
+ *  line2: "Error:0"
+ */
+void OLED_ShowCabinetStatus(char *line1, char *line2)
+{
+    OLED_Clear();
 
+    // 第一行：中号字体（清晰）
+    OLED_ShowStringMid(0, 0, (u8 *)line1);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    // 第二行：小号字体
+    OLED_ShowStringSmall(0, 2, (u8 *)line2);
+}

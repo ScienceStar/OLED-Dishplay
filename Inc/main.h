@@ -20,7 +20,7 @@ extern uint16_t UartRxTimer;
 extern uint16_t UartRxOKFlag;
 extern uint16_t UartIntRxLen;
 extern volatile uint8_t TcpClosedFlag;
-extern uint8_t WiFiStatus;
+extern volatile uint8_t WiFiStatus;
 extern int8_t WiFiRSSI;
 
 extern uint8_t Uart_RecvFlag(void);

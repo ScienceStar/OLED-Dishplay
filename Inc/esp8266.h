@@ -35,4 +35,14 @@ void ESP8266_SendString(const char *str);
 void ESP8266_ClearRx(void);
 bool ESP8266_WaitReply(const char *ack, uint32_t timeout);
 
+/* ================= MQTT消息处理 ================= */
+void ESP8266_Init(void);
+void ESP8266_MQTT_Init(void);
+void ESP8266_RxHandler(uint8_t ch);
+bool ESP8266_MQTT_HasMsg(void);
+char* ESP8266_MQTT_GetPayload(void);
+bool ESP8266_SendAndWait(const char *cmd,
+                         const char *ack,
+                         uint32_t timeout);
+
 #endif

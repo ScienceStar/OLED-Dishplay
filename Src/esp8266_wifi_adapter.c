@@ -14,7 +14,7 @@ bool WiFi_begin(const char *ssid, const char *pwd)
 uint8_t WiFi_connected(void)
 {
     // rely on global WiFiStatus if available, otherwise test
-    extern uint8_t WiFiStatus;
+    extern volatile uint8_t WiFiStatus;
     return WiFiStatus;
 }
 
