@@ -93,9 +93,12 @@ int main(void)
         char mqtt_char = 'X';
 
         if (WiFiStatus == 1) {
-            if (WiFiRSSI >= -50)      wifi_char = '*';
-            else if (WiFiRSSI >= -70) wifi_char = '+';
-            else                      wifi_char = '.';
+            if (WiFiRSSI >= -50)
+                wifi_char = '*';
+            else if (WiFiRSSI >= -70)
+                wifi_char = '+';
+            else
+                wifi_char = '.';
         }
 
         if (!TcpClosedFlag && WiFiStatus) tcp_char = 'T';
@@ -169,8 +172,8 @@ int main(void)
             char *rssi_ptr = strstr((char *)UartRxbuf, "+CWJAP:");
             if (rssi_ptr) WiFiRSSI = atoi(rssi_ptr + 7);
             if (strstr((char *)UartRxbuf, "CLOSED\r\n")) {
-                TcpClosedFlag = 1;
-                mqttClient.connected = false;  // TCP断开 → MQTT断开
+                TcpClosedFlag        = 1;
+                mqttClient.connected = false; // TCP断开 → MQTT断开
             }
             UartRxIndex = 0;
         }
@@ -193,16 +196,26 @@ int main(void)
         }
 
         /* ---------- MQTT模拟接收 ---------- */
-        strcpy(mqtt_json_buf, "{\"cell\":\"01\",\"open\":1,\"err\":0}");
+        /* strcpy(mqtt_json_buf, "{\"cell\":\"01\",\"open\":1,\"err\":0}");
         CabinetView_UpdateFromJson(mqtt_json_buf);
 
         MQTT_SimulateIncomingMessage(&mqttClient, "{\"cell\":\"01\",\"open\":1,\"err\":0}");
 
-        MQTT_HandleIncomingData(&mqttClient, esp8266_rx_buf);
+        MQTT_HandleIncomingData(&mqttClient, esp8266_rx_buf); */
 
         if (MQTT_MessageReceived(&mqttClient)) {
             printf("MQTT: %s\r\n", mqttClient.json_buf);
-            CabinetView_UpdateFromJson(mqttClient.json_buf);
+
+            // 使用本地缓冲区，避免被下一条消息覆盖
+            char json_local[MQTT_JSON_BUF_LEN];
+            strncpy(json_local, mqttClient.json_buf, MQTT_JSON_BUF_LEN - 1);
+            json_local[MQTT_JSON_BUF_LEN - 1] = '\0';
+
+            // 更新格口显示
+            CabinetView_UpdateFromJson(json_local);
+
+            // 刷新 OLED
+            OLED_Refresh(); // 你的 OLED 库可能叫 OLED_Update 或 OLED_Refresh
         }
 
         /* ---------- OLED 滚动显示 ---------- */
@@ -217,22 +230,34 @@ int main(void)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart == &huart2) {
-        UartRxFlag                  = 0x55;
+        // 使用正确的缓冲区名称
         UartIntRxbuf[UartRxIndex++] = UartRxData;
         if (UartRxIndex >= 1024) UartRxIndex = 0;
         UartIntRxLen = UartRxIndex;
+        UartRxFlag   = 0x55;
         UartRxOKFlag = 0x55;
 
         extern uint8_t esp8266_rx_buf[];
         extern uint16_t esp8266_rx_len;
         extern volatile uint8_t esp8266_rx_ok;
+
         if (esp8266_rx_len < ESP8266_RX_MAX) {
             esp8266_rx_buf[esp8266_rx_len++] = UartRxData;
+
+            // 判断一条完整消息
             if (UartRxData == '\n' || UartRxData == '\r' || UartRxData == '>') {
                 esp8266_rx_buf[esp8266_rx_len] = '\0';
                 esp8266_rx_ok                  = 1;
+
+                // 收到完整 MQTT 消息立即处理，强制类型转换
+                MQTT_HandleIncomingData(&mqttClient, (const char *)esp8266_rx_buf);
+
+                // 重置接收长度
+                esp8266_rx_len = 0;
             }
         }
+
+        // 继续接收下一个字节
         HAL_UART_Receive_IT(&huart2, &UartRxData, 1);
     }
 }
