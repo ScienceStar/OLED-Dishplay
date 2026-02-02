@@ -81,7 +81,7 @@ int main(void)
 
     // MQTT 初始化
     /* 初始化 MQTT */
-    MQTT_Init(&mqttClient, "192.168.1.100", 1883, "STM32_Client1", "cabinet/status");
+    MQTT_Init(&mqttClient, "192.168.0.7", 1883, "STM32_Client1", "cabinet/status");
     MQTT_Connect(&mqttClient);
     MQTT_Subscribe(&mqttClient);
 
