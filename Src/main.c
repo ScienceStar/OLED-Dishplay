@@ -4,6 +4,11 @@
 #include "cabinet_view.h"
 #include "string.h"
 #include <stdio.h>
+#include <math.h>  // 用于正弦渐变
+
+#ifndef M_PI
+#define M_PI 3.14159265f
+#endif
 
 /* ================== Morse LED Config ================== */
 #define DOT_DURATION  300
@@ -11,7 +16,7 @@
 #define SYMBOL_SPACE  DOT_DURATION
 #define LETTER_SPACE  (DOT_DURATION * 3)
 #define WORD_SPACE    (DOT_DURATION * 7)
-#define BREATH_STEPS  5
+#define BREATH_STEPS  50 // 渐变步数，越多越平滑
 
 /* ================== UART / MQTT Buffers ================== */
 extern char mqtt_rx_buf[256];    // ESP8266 MQTT payload
@@ -36,8 +41,17 @@ typedef struct {
     char c;
     const char *morse;
 } MorseMap;
+
 MorseMap morse_table[] = {
-    {'A', ".-"}, {'B', "-..."}, {'C', "-.-."}, {'D', "-.."}, {'E', "."}, {'F', "..-."}, {'G', "--."}, {'H', "...."}, {'I', ".."}, {'J', ".---"}, {'K', "-.-"}, {'L', ".-.."}, {'M', "--"}, {'N', "-."}, {'O', "---"}, {'P', ".--."}, {'Q', "--.-"}, {'R', ".-."}, {'S', "..."}, {'T', "-"}, {'U', "..-"}, {'V', "...-"}, {'W', ".--"}, {'X', "-..-"}, {'Y', "-.--"}, {'Z', "--.."}, {'0', "-----"}, {'1', ".----"}, {'2', "..---"}, {'3', "...--"}, {'4', "....-"}, {'5', "....."}, {'6', "-...."}, {'7', "--..."}, {'8', "---.."}, {'9', "----."}, {' ', " "}};
+    {'A', ".-"}, {'B', "-..."}, {'C', "-.-."}, {'D', "-.."}, {'E', "."}, {'F', "..-."}, 
+    {'G', "--."}, {'H', "...."}, {'I', ".."}, {'J', ".---"}, {'K', "-.-"}, {'L', ".-.."}, 
+    {'M', "--"}, {'N', "-."}, {'O', "---"}, {'P', ".--."}, {'Q', "--.-"}, {'R', ".-."}, 
+    {'S', "..."}, {'T', "-"}, {'U', "..-"}, {'V', "...-"}, {'W', ".--"}, {'X', "-..-"}, 
+    {'Y', "-.--"}, {'Z', "--.."}, {'0', "-----"}, {'1', ".----"}, {'2', "..---"}, 
+    {'3', "...--"}, {'4', "....-"}, {'5', "....."}, {'6', "-...."}, {'7', "--..."}, 
+    {'8', "---.."}, {'9', "----."}, {' ', " "}
+};
+
 const char *get_morse(char c)
 {
     if (c >= 'a' && c <= 'z') c -= 32;
@@ -56,12 +70,12 @@ int main(void)
 
     OLED_Init();
     OLED_Clear();
-    OLED_ShowString(0, 0, "Booting...");
-    OLED_Clear();
+    uint8_t boot_msg[] = "Booting...";
+    OLED_ShowString(0, 0, boot_msg);
+    OLED_Refresh();  // 刷新显示
 
     ESP8266_Init();
     ESP8266_MQTT_Init();
-
     CabinetView_Init();
 
     uint32_t last_oled_tick  = HAL_GetTick();
@@ -96,25 +110,23 @@ int main(void)
 /* ================== Morse LED Functions ================== */
 void breathe_led_smooth(uint32_t duration)
 {
-    uint32_t step_delay = duration / (2 * BREATH_STEPS);
-    for (int i = 0; i < BREATH_STEPS; i++) {
+    // 软件PWM，正弦渐变
+    for (int step = 0; step < BREATH_STEPS; step++) {
+        float brightness = sinf(M_PI * step / (BREATH_STEPS - 1)); // 0~1
+        if (brightness < 0.05f) brightness = 0.05f;                // 保底亮度
         HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
-        HAL_Delay(step_delay);
+        HAL_Delay(duration * brightness);
         HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
-        HAL_Delay(step_delay);
-    }
-    for (int i = BREATH_STEPS; i > 0; i--) {
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
-        HAL_Delay(step_delay);
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
-        HAL_Delay(step_delay);
+        HAL_Delay(duration * (1.0f - brightness));
     }
 }
+
 void morse_dot(void)
 {
     breathe_led_smooth(DOT_DURATION);
     HAL_Delay(SYMBOL_SPACE);
 }
+
 void morse_dash(void)
 {
     breathe_led_smooth(DASH_DURATION);
@@ -167,7 +179,7 @@ void esp8266_led_update(void)
 /* ================== Peripheral Init ================== */
 static void MX_USART2_UART_Init(void)
 {
-    huart2.Instance          = USART2; // 改为 USART2
+    huart2.Instance          = USART2;
     huart2.Init.BaudRate     = 115200;
     huart2.Init.WordLength   = UART_WORDLENGTH_8B;
     huart2.Init.StopBits     = UART_STOPBITS_1;
