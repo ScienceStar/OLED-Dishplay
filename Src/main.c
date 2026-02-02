@@ -196,12 +196,12 @@ int main(void)
         }
 
         /* ---------- MQTTÄ£Äâ½ÓÊÕ ---------- */
-        /* strcpy(mqtt_json_buf, "{\"cell\":\"01\",\"open\":1,\"err\":0}");
+        strcpy(mqtt_json_buf, "{\"cellId\":\"01\",\"opened\":1,\"errro\":0}");
         CabinetView_UpdateFromJson(mqtt_json_buf);
 
-        MQTT_SimulateIncomingMessage(&mqttClient, "{\"cell\":\"01\",\"open\":1,\"err\":0}");
+        MQTT_SimulateIncomingMessage(&mqttClient, "{\"cellId\":\"01\",\"opened\":1,\"error\":0}");
 
-        MQTT_HandleIncomingData(&mqttClient, esp8266_rx_buf); */
+        MQTT_HandleIncomingData(&mqttClient, esp8266_rx_buf);
 
         if (MQTT_MessageReceived(&mqttClient)) {
             printf("MQTT: %s\r\n", mqttClient.json_buf);

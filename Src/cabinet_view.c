@@ -43,7 +43,7 @@ void CabinetView_UpdateFromJson(char *json)
     char line2[32] = {0};
 
     if (sscanf(json, "{\"cellId\":\"%7[^\"]\",\"opened\":%d,\"error\":%d}", cell, &open, &err) == 3) {
-        snprintf(line1, sizeof(line1), "Cell %s  Open:%d", cell, open);
+        snprintf(line1, sizeof(line1), "CellId %s  Opened:%d", cell, open);
         snprintf(line2, sizeof(line2), "Error:%d", err);
 
         CabinetView_ClearScrollLines();
