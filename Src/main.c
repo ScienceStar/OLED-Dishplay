@@ -79,7 +79,7 @@ int main(void)
     CabinetView_Init();
 
     // MQTT 初始化
-    MQTT_Init(&mqttClient, "192.168.0.7", 1883, "STM32_Client1", "cabinet/status");
+    MQTT_Init(&mqttClient, "192.168.0.7", 1883, "STM32_Client1", "cabinet/device/status");
     MQTT_Connect(&mqttClient);
     MQTT_Subscribe(&mqttClient);
 
@@ -196,27 +196,38 @@ int main(void)
         }
 
         /* ---------- MQTT模拟接收 ---------- */
-        strcpy(mqtt_json_buf, "{\"cellId\":\"01\",\"opened\":1,\"errro\":0}");
+        /* strcpy(mqtt_json_buf, "{\"cellId\":\"01\",\"opened\":1,\"errro\":0}");
         CabinetView_UpdateFromJson(mqtt_json_buf);
 
         MQTT_SimulateIncomingMessage(&mqttClient, "{\"cellId\":\"01\",\"opened\":1,\"error\":0}");
 
-        MQTT_HandleIncomingData(&mqttClient, esp8266_rx_buf);
+        MQTT_HandleIncomingData(&mqttClient, esp8266_rx_buf); */
 
+        /* 1. ESP8266 收包完成 */
+        if (esp8266_rx_ok) {
+            esp8266_rx_ok = 0;
+
+            // 把串口数据喂给 MQTT
+            MQTT_HandleIncomingData(&mqttClient,
+                                    (char *)esp8266_rx_buf);
+        }
+
+        /* 2. MQTT 有新业务消息 */
         if (MQTT_MessageReceived(&mqttClient)) {
-            printf("MQTT: %s\r\n", mqttClient.json_buf);
 
-            // 使用本地缓冲区，避免被下一条消息覆盖
             char json_local[MQTT_JSON_BUF_LEN];
-            strncpy(json_local, mqttClient.json_buf, MQTT_JSON_BUF_LEN - 1);
+            strncpy(json_local,
+                    mqttClient.json_buf,
+                    MQTT_JSON_BUF_LEN - 1);
             json_local[MQTT_JSON_BUF_LEN - 1] = '\0';
 
-            // 更新格口显示
             CabinetView_UpdateFromJson(json_local);
-
-            // 刷新 OLED
-            OLED_Refresh(); // 你的 OLED 库可能叫 OLED_Update 或 OLED_Refresh
         }
+
+        /* 3. OLED 轮播（必须周期性执行） */
+        CabinetView_ScrollTaskSmall(0);
+
+        HAL_Delay(30);
 
         /* ---------- OLED 滚动显示 ---------- */
         if (now - last_scroll_tick >= 300) {

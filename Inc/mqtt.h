@@ -62,4 +62,7 @@ void MQTT_SimulateIncomingMessage(MQTT_Client *client, const char *json);
  */
 void MQTT_HandleIncomingData(MQTT_Client *client, const char *raw);
 
+/* ===== MQTT 报文发送函数 ===== */
+void MQTT_SendConnectPacket(MQTT_Client *client);
+void MQTT_SendSubscribePacket(MQTT_Client *client, const char *topic);
 #endif /* __MQTT_H */

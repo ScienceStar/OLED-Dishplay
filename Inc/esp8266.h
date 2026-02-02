@@ -6,15 +6,22 @@
 #include <stdint.h>
 
 /* ================= 配置 ================= */
-#define ESP8266_UART     huart2
-#define ESP8266_RX_MAX   1024
+#define ESP8266_UART   huart2
+#define ESP8266_RX_MAX 1024
 
 /* ================= 枚举 ================= */
-typedef enum { STA = 1, AP = 2, STA_AP = 3 } ESP8266_Mode;
-typedef enum { enumTCP, enumUDP } ESP8266_NetProto;
+typedef enum {
+    STA    = 1,
+    AP     = 2,
+    STA_AP = 3
+} ESP8266_Mode;
+typedef enum {
+    enumTCP,
+    enumUDP
+} ESP8266_NetProto;
 
 /* ================= 状态变量 ================= */
-extern uint8_t  esp8266_rx_buf[ESP8266_RX_MAX];
+extern uint8_t esp8266_rx_buf[ESP8266_RX_MAX];
 extern uint16_t esp8266_rx_len;
 extern volatile uint8_t esp8266_rx_ok;
 
@@ -40,9 +47,16 @@ void ESP8266_Init(void);
 void ESP8266_MQTT_Init(void);
 void ESP8266_RxHandler(uint8_t ch);
 bool ESP8266_MQTT_HasMsg(void);
-char* ESP8266_MQTT_GetPayload(void);
+char *ESP8266_MQTT_GetPayload(void);
 bool ESP8266_SendAndWait(const char *cmd,
                          const char *ack,
                          uint32_t timeout);
 
+/* ================= MQTT 消息处理 ================= */
+void ESP8266_MQTT_Init(void);
+void ESP8266_RxHandler(uint8_t ch);
+bool ESP8266_MQTT_HasMsg(void);
+char *ESP8266_MQTT_GetPayload(void);
+bool ESP8266_SendCmd(const char *cmd, const char *ack, uint32_t timeout);
+bool ESP8266_WaitResponse(const char *ack);
 #endif
