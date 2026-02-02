@@ -188,15 +188,16 @@ int main(void)
         }
 
         /* ---------- MQTT模拟接收 ---------- */
-        /* strcpy(mqtt_json_buf, "{\"cell\":\"01\",\"open\":1,\"err\":0}");
+        strcpy(mqtt_json_buf, "{\"cell\":\"01\",\"open\":1,\"err\":0}");
         CabinetView_UpdateFromJson(mqtt_json_buf);
 
-        MQTT_SimulateIncomingMessage(&mqttClient, "{\"cell\":\"01\",\"open\":1,\"err\":0}"); */
+        MQTT_SimulateIncomingMessage(&mqttClient, "{\"cell\":\"01\",\"open\":1,\"err\":0}");
 
         // ESP8266 接收到 MQTT 消息后调用
-        // MQTT_HandleIncomingData(&mqttClient, esp8266_rx_buf);
+         MQTT_HandleIncomingData(&mqttClient, esp8266_rx_buf);
 
         if (MQTT_MessageReceived(&mqttClient)) {
+            printf("MQTT: %s\r\n", mqttClient.json_buf);
             CabinetView_UpdateFromJson(mqttClient.json_buf);
         }
 
