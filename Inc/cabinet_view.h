@@ -10,6 +10,8 @@ void CabinetView_Init(void);
 /* 从 MQTT JSON 更新格口状态 */
 void CabinetView_UpdateFromJson(char *json);
 
+void CabinetView_RotateDisplay(void);
+
 /* OLED 滚动显示任务（周期调用） */
 void CabinetView_ScrollTask(void);
 

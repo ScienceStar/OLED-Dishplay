@@ -31,35 +31,68 @@ void CabinetView_Init(void)
 /* ================== 从 MQTT JSON 更新显示 ================== */
 void CabinetView_UpdateFromJson(char *json)
 {
-    static char last_json[MQTT_JSON_BUF_LEN] = {0}; // 缓存上一次显示的内容
+    static char last_json[MQTT_JSON_BUF_LEN] = {0};
 
-    // 如果内容没变化，直接返回，避免重复刷新
     if (strcmp(json, last_json) == 0) return;
 
-    char cell[8]   = {0};
-    int open       = 0;
-    int err        = 0;
-    char line1[32] = {0};
-    char line2[32] = {0};
+    char cell[8] = {0};
+    int open = 0;
+    int err = 0;
+    char line1_tmp[32] = {0};
+    char line2_tmp[32] = {0};
 
     if (sscanf(json, "{\"cellId\":\"%7[^\"]\",\"opened\":%d,\"error\":%d}", cell, &open, &err) == 3) {
-        snprintf(line1, sizeof(line1), "CellId %s  Opened:%d", cell, open);
-        snprintf(line2, sizeof(line2), "Error:%d", err);
+        snprintf(line1_tmp, sizeof(line1_tmp), "Cell %s Open:%d", cell, open);
+        snprintf(line2_tmp, sizeof(line2_tmp), "Error:%d", err);
 
-        CabinetView_ClearScrollLines();
-        CabinetView_AddScrollLine(line1);
-        CabinetView_AddScrollLine(line2);
+        // 检查格口是否已存在
+        uint8_t found = 0;
+        for (uint8_t i = 0; i < scroll_count; i += 2) {
+            if (strncmp(scroll_lines[i], line1_tmp, MAX_SCROLL_TEXT) == 0) {
+                strncpy(scroll_lines[i+1], line2_tmp, MAX_SCROLL_TEXT-1);
+                scroll_lines[i+1][MAX_SCROLL_TEXT-1] = '\0';
+                found = 1;
+                break;
+            }
+        }
 
-        // 立即刷新 OLED
-        OLED_ShowStringSmall(0, 0, (uint8_t *)line1);
-        OLED_ShowStringSmall(0, 8, (uint8_t *)line2);
+        // 不存在就添加
+        if (!found) {
+            if (scroll_count + 2 <= MAX_LINES) {
+                CabinetView_AddScrollLine(line1_tmp);
+                CabinetView_AddScrollLine(line2_tmp);
+            } else {
+                // 超过 MAX_LINES，覆盖最旧的格口
+                strncpy(scroll_lines[0], line1_tmp, MAX_SCROLL_TEXT-1);
+                scroll_lines[0][MAX_SCROLL_TEXT-1] = '\0';
+                strncpy(scroll_lines[1], line2_tmp, MAX_SCROLL_TEXT-1);
+                scroll_lines[1][MAX_SCROLL_TEXT-1] = '\0';
+            }
+        }
 
-        // 更新缓存
-        strncpy(last_json, json, MQTT_JSON_BUF_LEN - 1);
-        last_json[MQTT_JSON_BUF_LEN - 1] = '\0';
-    } else {
-        printf("CabinetView_UpdateFromJson: JSON解析失败: %s\n", json);
+        strncpy(last_json, json, MQTT_JSON_BUF_LEN-1);
+        last_json[MQTT_JSON_BUF_LEN-1] = '\0';
     }
+}
+
+// OLED 每次刷新显示一组格口信息
+void CabinetView_RotateDisplay(void)
+{
+    static uint8_t current_index = 0;
+    if (scroll_count == 0) return;
+
+    OLED_Clear();
+
+    // 每次显示两个行：line1 + line2
+    char *line1 = scroll_lines[current_index];
+    char *line2 = scroll_lines[current_index+1];
+
+    OLED_ShowStringSmall(0, 2, (u8 *)line1);
+    OLED_ShowStringSmall(0, 4, (u8 *)line2);
+
+    // 指向下一组格口
+    current_index += 2;
+    if (current_index >= scroll_count) current_index = 0;
 }
 
 /* ================== 增加滚动行 ================== */

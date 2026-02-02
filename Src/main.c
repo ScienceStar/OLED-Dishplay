@@ -220,7 +220,7 @@ int main(void)
 
         /* ---------- OLED ¹ö¶¯ÏÔÊ¾ ---------- */
         if (now - last_scroll_tick >= 300) {
-            CabinetView_ScrollTaskSmall(2);
+            CabinetView_RotateDisplay();
             last_scroll_tick = now;
         }
     }
