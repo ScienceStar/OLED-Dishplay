@@ -90,16 +90,18 @@ int main(void)
         /* ---------- 顶部 WiFi / TCP / MQTT 状态 ---------- */
         char status_str[24];
         char wifi_char = 'X';
-        char tcp_char  = 'x';
+        char tcp_char  = 'X';
         char mqtt_char = 'X';
 
         if (WiFiStatus == 1) {
-            if (WiFiRSSI >= -50)
-                wifi_char = '*';
-            else if (WiFiRSSI >= -70)
-                wifi_char = '+';
-            else
-                wifi_char = '.';
+            if (ESP8266_GetRSSI()) {
+                if (WiFiRSSI >= -50)
+                    wifi_char = '*';
+                else if (WiFiRSSI >= -70)
+                    wifi_char = '+';
+                else
+                    wifi_char = '.';
+            }
         }
 
         if (!TcpClosedFlag && WiFiStatus) tcp_char = 'T';
@@ -196,7 +198,7 @@ int main(void)
         }
 
         /* ---------- MQTT处理 ---------- */
-        if (esp8266_rx_len>0) {
+        if (esp8266_rx_len > 0) {
             esp8266_rx_len = 0;
             MQTT_HandleIncomingData(&mqttClient, (char *)esp8266_rx_buf);
         }
@@ -238,12 +240,12 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             temp_line[temp_len++] = UartRxData;
 
             // 检测行结束
-            if (UartRxData == '\n' || UartRxData == '>' ) {
+            if (UartRxData == '\n' || UartRxData == '>') {
                 temp_line[temp_len] = '\0'; // 添加结尾
                 // 保存到环形缓冲
                 ESP8266_Line *pLine = &esp8266_lines[esp8266_line_write_index];
                 strncpy(pLine->line, temp_line, ESP8266_LINE_MAX);
-                pLine->len = temp_len;
+                pLine->len   = temp_len;
                 pLine->ready = 1;
 
                 // 更新写入索引

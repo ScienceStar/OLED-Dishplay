@@ -2,6 +2,7 @@
 #include "usart.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 /* ================= 全局变量 ================= */
 uint8_t esp8266_rx_byte;
@@ -147,6 +148,58 @@ bool ESP8266_JoinAP(const char *ssid, const char *pwd)
     char cmd[128];
     sprintf(cmd, "AT+CWJAP=\"%s\",\"%s\"\r\n", ssid, pwd);
     return ESP8266_SendAndWait(cmd, "WIFI GOT IP", 8000);
+}
+
+bool ESP8266_GetRSSI(void)
+{
+    ESP8266_ClearRx();
+
+    // 发送查询命令
+    HAL_UART_Transmit(&ESP8266_UART,
+                      (uint8_t *)"AT+CWJAP?\r\n",
+                      strlen("AT+CWJAP?\r\n"),
+                      1000);
+
+    uint32_t start = HAL_GetTick();
+
+    while ((HAL_GetTick() - start) < 2000) {
+
+        if (esp8266_lines[esp8266_line_read_index].ready) {
+
+            ESP8266_Line *line =
+                &esp8266_lines[esp8266_line_read_index];
+
+            printf("[ESP] %s\n", line->line);
+
+            // 查找 +CWJAP 行
+            if (strstr(line->line, "+CWJAP:")) {
+
+                /*
+                 * 示例：
+                 * +CWJAP:"SSID","MAC",channel,-57
+                 */
+                char *last_comma = strrchr(line->line, ',');
+
+                if (last_comma) {
+                    WiFiRSSI = (int8_t)atoi(last_comma + 1);
+                }
+
+                line->ready = 0;
+                esp8266_line_read_index =
+                    (esp8266_line_read_index + 1) % ESP8266_LINE_NUM;
+
+                return true;
+            }
+
+            line->ready = 0;
+            esp8266_line_read_index =
+                (esp8266_line_read_index + 1) % ESP8266_LINE_NUM;
+        } else {
+            HAL_Delay(1);
+        }
+    }
+
+    return false;
 }
 
 bool ESP8266_TCP_Connect(const char *ip, uint16_t port)
