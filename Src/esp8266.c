@@ -10,6 +10,17 @@ ESP8266_Line esp8266_lines[ESP8266_LINE_NUM];
 volatile uint8_t esp8266_line_write_index = 0;
 volatile uint8_t esp8266_line_read_index  = 0;
 
+/* ================== WiFi 自动重连 ================== */
+uint32_t wifi_reconnect_tick = 0;
+#define WIFI_RECONNECT_INTERVAL 5000
+
+/* ================== UART & ESP8266 ================== */
+uint8_t UartRxData;
+uint8_t UartRxbuf[1024], UartIntRxbuf[1024];
+uint16_t UartRxIndex = 0, UartRxFlag = 0, UartRxLen = 0, UartRxOKFlag = 0, UartIntRxLen = 0;
+volatile uint8_t WiFiStatus; // 0=断开,1=连接
+int8_t WiFiRSSI = 0;
+
 /* 原始接收缓冲（给 MQTT / 透明数据用） */
 uint8_t  esp8266_rx_buf[ESP8266_RX_MAX];
 uint16_t esp8266_rx_len = 0;

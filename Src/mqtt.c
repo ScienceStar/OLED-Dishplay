@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include "esp8266.h"
 
+/* ================== MQTT 客户端 ================== */
+MQTT_Client mqttClient;
+
 /* ================= 初始化 ================= */
 bool MQTT_Init(MQTT_Client *client,
                const char *broker,

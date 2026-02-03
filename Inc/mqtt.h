@@ -1,7 +1,6 @@
 #ifndef __MQTT_H
 #define __MQTT_H
 
-#include "main.h"
 #include <stdint.h>
 #include <stdbool.h>
 

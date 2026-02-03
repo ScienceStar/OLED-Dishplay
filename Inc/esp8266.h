@@ -10,6 +10,7 @@
 #define ESP8266_RX_MAX     1024
 #define ESP8266_LINE_MAX   128
 #define ESP8266_LINE_NUM   8
+#define WIFI_RECONNECT_INTERVAL 5000
 
 /* ================= 行缓冲 ================= */
 typedef struct {
@@ -20,10 +21,16 @@ typedef struct {
 
 /* ================= 对外变量 ================= */
 extern uint8_t  esp8266_rx_byte;
-
 extern ESP8266_Line esp8266_lines[ESP8266_LINE_NUM];
 extern volatile uint8_t esp8266_line_write_index;
 extern volatile uint8_t esp8266_line_read_index;
+extern uint8_t UartRxData;
+extern uint8_t UartRxbuf[1024], UartIntRxbuf[1024];
+extern uint16_t UartRxIndex, UartRxFlag, UartRxLen, UartRxOKFlag, UartIntRxLen;
+/* ================== WiFi 自动重连 ================== */
+extern uint32_t wifi_reconnect_tick;
+extern volatile uint8_t WiFiStatus; // 0=断开,1=连接
+extern int8_t WiFiRSSI;
 
 /* （保留给 MQTT / 原始数据用） */
 extern uint8_t  esp8266_rx_buf[ESP8266_RX_MAX];

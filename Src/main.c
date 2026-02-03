@@ -5,7 +5,6 @@
 #include "tcp.h"
 #include "usart.h"
 #include "cabinet_view.h"
-#include "mqtt.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,21 +47,6 @@ const char *get_morse(char c)
         if (morse_table[i].c == c) return morse_table[i].morse;
     return "";
 }
-
-/* ================== UART & ESP8266 ================== */
-uint8_t UartRxData;
-uint8_t UartRxbuf[1024], UartIntRxbuf[1024];
-uint16_t UartRxIndex = 0, UartRxFlag = 0, UartRxLen = 0, UartRxOKFlag = 0, UartIntRxLen = 0;
-volatile uint8_t WiFiStatus; // 0=断开,1=连接
-int8_t WiFiRSSI = 0;
-extern volatile uint8_t TcpClosedFlag;
-
-/* ================== MQTT 客户端 ================== */
-MQTT_Client mqttClient;
-
-/* ================== WiFi 自动重连 ================== */
-uint32_t wifi_reconnect_tick = 0;
-#define WIFI_RECONNECT_INTERVAL 5000
 
 void ESP_WiFi_ReconnectTask(void)
 {

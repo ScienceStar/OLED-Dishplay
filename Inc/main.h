@@ -7,20 +7,23 @@ extern "C" {
 
 #include "stm32f1xx_hal.h"
 #include <stdbool.h>
+#include <stdint.h>       // 修复 uint8_t, int8_t 未定义问题
+#include "mqtt.h"         // 修复 MQTT_Client 未知类型问题
 
-/* Exported functions prototypes */
-void Error_Handler(void);
+/* ================== MQTT 客户端 ================== */
+extern MQTT_Client mqttClient;
 
 /* ================= UART & ESP8266 ================= */
 extern uint8_t UartTxbuf[1000];
-extern uint8_t UartRxbuf[1024], UartIntRxbuf[1024];
+extern uint8_t UartRxbuf[1024];
+extern uint8_t UartIntRxbuf[1024];
 extern uint16_t UartRxIndex;
 extern uint16_t UartRxFlag;
 extern uint16_t UartRxLen;
 extern uint16_t UartRxTimer;
 extern uint16_t UartRxOKFlag;
 extern uint16_t UartIntRxLen;
-extern volatile uint8_t TcpClosedFlag;
+extern volatile uint8_t TcpClosedFlag;  // 修复类型一致性
 extern volatile uint8_t WiFiStatus;
 extern int8_t WiFiRSSI;
 
@@ -51,6 +54,8 @@ extern void esp8266_led_update(void);
 /* ================= System ================= */
 void SystemClock_Config(void);
 
+/* ================错误处理============================= */
+void Error_Handler(void);
 #ifdef __cplusplus
 }
 #endif
