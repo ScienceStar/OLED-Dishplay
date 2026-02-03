@@ -12,6 +12,9 @@
 #define MQTT_CLIENTID_MAXLEN 32
 #define MQTT_TOPIC_MAXLEN 64
 
+/* SUBSCRIBE 报文固定 Packet ID，这里用 1 */
+#define MQTT_SUB_PACKET_ID 0x0001
+
 typedef struct {
     char broker[MQTT_BROKER_MAXLEN];
     uint16_t port;
@@ -27,7 +30,7 @@ typedef struct {
 /**
  * 初始化 MQTT 客户端
  */
-void MQTT_Init(MQTT_Client *client, const char *broker, uint16_t port,
+bool MQTT_Init(MQTT_Client *client, const char *broker, uint16_t port,
                const char *client_id, const char *topic);
 
 /**

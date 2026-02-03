@@ -4,28 +4,42 @@
 #include "esp8266.h"
 
 /* ================= 初始化 ================= */
-void MQTT_Init(MQTT_Client *client,
+bool MQTT_Init(MQTT_Client *client,
                const char *broker,
                uint16_t port,
                const char *client_id,
                const char *topic)
 {
-    if (!client) return;
+    if (!client || !broker || !client_id || !topic)
+        return false;
 
-    strncpy(client->broker, broker, MQTT_BROKER_MAXLEN - 1);
-    client->broker[MQTT_BROKER_MAXLEN - 1] = '\0';
+    /* broker */
+    if (strlen(broker) >= MQTT_BROKER_MAXLEN)
+        return false;
+    strcpy(client->broker, broker);
 
+    /* port */
+    if (port == 0 || port > 65535)
+        return false;
     client->port = port;
 
-    strncpy(client->client_id, client_id, MQTT_CLIENTID_MAXLEN - 1);
-    client->client_id[MQTT_CLIENTID_MAXLEN - 1] = '\0';
+    /* client id */
+    if (strlen(client_id) >= MQTT_CLIENTID_MAXLEN)
+        return false;
+    strcpy(client->client_id, client_id);
 
-    strncpy(client->topic, topic, MQTT_TOPIC_MAXLEN - 1);
-    client->topic[MQTT_TOPIC_MAXLEN - 1] = '\0';
+    /* topic */
+    if (strlen(topic) >= MQTT_TOPIC_MAXLEN)
+        return false;
+    strcpy(client->topic, topic);
 
+    /* state init */
     client->connected = false;
     client->new_msg   = false;
+
     memset(client->json_buf, 0, MQTT_JSON_BUF_LEN);
+
+    return true;
 }
 
 static const uint8_t mqtt_connect_pkt[] = {
@@ -60,16 +74,42 @@ bool MQTT_Connect(MQTT_Client *client)
     return true;
 }
 
-/* ================= 订阅（逻辑） ================= */
+/* ================= 订阅 ================= */
 bool MQTT_Subscribe(MQTT_Client *client)
 {
     if (!client || !client->connected)
         return false;
 
-    /*
-     * 实际订阅行为应由 ESP8266 AT 指令完成
-     * STM32 只保存 topic，用于调试或日志
-     */
+    uint8_t sub_pkt[128]; // 根据 topic 长度动态调整即可
+    uint16_t len       = 0;
+    uint16_t topic_len = strlen(client->topic);
+
+    if (topic_len + 5 > sizeof(sub_pkt))
+        return false; // topic 太长
+
+    /* 固定报文头：SUBSCRIBE, QoS 1 */
+    sub_pkt[len++] = 0x82;          // SUBSCRIBE, QoS=1
+    sub_pkt[len++] = topic_len + 3; // 剩余长度 = PacketID(2) + topic_len + QoS(1)
+
+    /* Packet ID */
+    sub_pkt[len++] = (MQTT_SUB_PACKET_ID >> 8) & 0xFF;
+    sub_pkt[len++] = MQTT_SUB_PACKET_ID & 0xFF;
+
+    /* Topic */
+    sub_pkt[len++] = (topic_len >> 8) & 0xFF;
+    sub_pkt[len++] = topic_len & 0xFF;
+    memcpy(&sub_pkt[len], client->topic, topic_len);
+    len += topic_len;
+
+    /* QoS */
+    sub_pkt[len++] = 0x00; // QoS 0
+
+    /* 发送报文 */
+    if (!ESP8266_SendRaw(sub_pkt, len))
+        return false;
+
+    /* 等待 SUBACK 响应（简化版，实际可解析二进制） */
+    // 如果你还没实现二进制解析，先直接返回 true
     return true;
 }
 
