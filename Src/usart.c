@@ -19,6 +19,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "usart.h"
+#include "string.h"
 #include "esp8266.h"
 
 /* USER CODE BEGIN 0 */
@@ -108,14 +109,44 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
   }
 }
 
+/* ================== UART回调 ================== */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    if (huart == &ESP8266_UART)
-    {
-        ESP8266_RxHandler(esp8266_rx_byte);
+    static char temp_line[ESP8266_LINE_MAX];
+    static uint16_t temp_len = 0;
 
-        // ★★★ 关键：重新开启 1 字节接收 ★★★
-        HAL_UART_Receive_IT(&ESP8266_UART, &esp8266_rx_byte, 1);
+    if (huart == &huart2) {
+        // 保存到通用缓冲
+        UartIntRxbuf[UartRxIndex++] = UartRxData;
+        if (UartRxIndex >= 1024) UartRxIndex = 0;
+        UartIntRxLen = UartRxIndex;
+        UartRxFlag   = 0x55;
+        UartRxOKFlag = 0x55;
+
+        // ---- ESP8266环形缓冲接收 ----
+        if (temp_len < ESP8266_LINE_MAX - 1) {
+            temp_line[temp_len++] = UartRxData;
+
+            // 检测行结束
+            if (UartRxData == '\n' || UartRxData == '>') {
+                temp_line[temp_len] = '\0'; // 添加结尾
+                // 保存到环形缓冲
+                ESP8266_Line *pLine = &esp8266_lines[esp8266_line_write_index];
+                strncpy(pLine->line, temp_line, ESP8266_LINE_MAX);
+                pLine->len   = temp_len;
+                pLine->ready = 1;
+
+                // 更新写入索引
+                esp8266_line_write_index++;
+                if (esp8266_line_write_index >= ESP8266_LINE_NUM) esp8266_line_write_index = 0;
+
+                // 清空临时行
+                temp_len = 0;
+            }
+        }
+
+        // 继续接收下一个字节
+        HAL_UART_Receive_IT(&huart2, &UartRxData, 1);
     }
 }
 
