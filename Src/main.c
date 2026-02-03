@@ -221,47 +221,6 @@ int main(void)
     }
 }
 
-/* ================== UART回调 ================== */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-    static char temp_line[ESP8266_LINE_MAX];
-    static uint16_t temp_len = 0;
-
-    if (huart == &huart2) {
-        // 保存到通用缓冲
-        UartIntRxbuf[UartRxIndex++] = UartRxData;
-        if (UartRxIndex >= 1024) UartRxIndex = 0;
-        UartIntRxLen = UartRxIndex;
-        UartRxFlag   = 0x55;
-        UartRxOKFlag = 0x55;
-
-        // ---- ESP8266环形缓冲接收 ----
-        if (temp_len < ESP8266_LINE_MAX - 1) {
-            temp_line[temp_len++] = UartRxData;
-
-            // 检测行结束
-            if (UartRxData == '\n' || UartRxData == '>') {
-                temp_line[temp_len] = '\0'; // 添加结尾
-                // 保存到环形缓冲
-                ESP8266_Line *pLine = &esp8266_lines[esp8266_line_write_index];
-                strncpy(pLine->line, temp_line, ESP8266_LINE_MAX);
-                pLine->len   = temp_len;
-                pLine->ready = 1;
-
-                // 更新写入索引
-                esp8266_line_write_index++;
-                if (esp8266_line_write_index >= ESP8266_LINE_NUM) esp8266_line_write_index = 0;
-
-                // 清空临时行
-                temp_len = 0;
-            }
-        }
-
-        // 继续接收下一个字节
-        HAL_UART_Receive_IT(&huart2, &UartRxData, 1);
-    }
-}
-
 /* ================== System Clock ================== */
 void SystemClock_Config(void)
 {

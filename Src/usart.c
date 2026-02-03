@@ -19,6 +19,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "usart.h"
+#include "esp8266.h"
 
 /* USER CODE BEGIN 0 */
 
@@ -105,6 +106,17 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
 
   /* USER CODE END USART2_MspDeInit 1 */
   }
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart == &ESP8266_UART)
+    {
+        ESP8266_RxHandler(esp8266_rx_byte);
+
+        // ★★★ 关键：重新开启 1 字节接收 ★★★
+        HAL_UART_Receive_IT(&ESP8266_UART, &esp8266_rx_byte, 1);
+    }
 }
 
 /* USER CODE BEGIN 1 */
