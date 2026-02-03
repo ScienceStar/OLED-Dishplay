@@ -37,8 +37,6 @@ static const uint8_t mqtt_connect_pkt[] = {
     0x00, 0x04, 't', 'e', 's', 't' // ClientID = "test"
 };
 
-#define MQTT_BROKER_HOST "192.168.0.6"
-#define MQTT_BROKER_PORT 1883
 /* ================= 连接（逻辑） ================= */
 bool MQTT_Connect(MQTT_Client *client)
 {

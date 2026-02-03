@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define MQTT_BROKER_HOST "192.168.0.6"
+#define MQTT_BROKER_PORT 1896
 #define MQTT_JSON_BUF_LEN 128
 #define MQTT_BROKER_MAXLEN 64
 #define MQTT_CLIENTID_MAXLEN 32
