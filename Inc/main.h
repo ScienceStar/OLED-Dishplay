@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include "stm32f1xx_hal.h"
+#include <stdbool.h>
 
 /* Exported functions prototypes */
 void Error_Handler(void);
@@ -41,7 +42,7 @@ extern void OLED_Clear(void);
 extern void OLED_ShowString(uint8_t x,uint8_t y,uint8_t *p);
 
 /* ================= ESP8266 TCP ================= */
-extern void ESP8266_Init(void);
+extern bool ESP8266_Init(void);
 extern void ESP8266_STA_TCPClient_Test(void);
 extern void TCP_ProcessData(uint8_t *buf, uint16_t len);
 extern void TCP_Task(void);

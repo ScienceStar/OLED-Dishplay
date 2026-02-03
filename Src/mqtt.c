@@ -1,4 +1,5 @@
 #include "mqtt.h"
+#include "tcp.h"
 #include <string.h>
 #include <stdio.h>
 #include "esp8266.h"
@@ -56,6 +57,10 @@ bool MQTT_Connect(MQTT_Client *client)
 {
     if (!client) return false;
 
+   bool wifi_ok = ESP8266_JoinAP(WIFI_SSID, WIFI_PWD);
+    if (!wifi_ok) {
+        return false;
+    }
     /* 1. TCP 连接 */
     if (!ESP8266_TCP_Connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT))
         return false;

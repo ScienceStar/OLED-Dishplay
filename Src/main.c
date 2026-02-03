@@ -28,6 +28,7 @@ typedef struct {
     const char *code;
     uint8_t index;
     uint8_t busy;
+    uint8_t ready;
     uint32_t duration;
 } MorseState;
 MorseState morse_state = {0};
@@ -38,15 +39,7 @@ typedef struct {
     const char *morse;
 } MorseMap;
 MorseMap morse_table[] = {
-    {'A', ".-"}, {'B', "-..."}, {'C', "-.-."}, {'D', "-.."}, {'E', "."},
-    {'F', "..-."}, {'G', "--."}, {'H', "...."}, {'I', ".."}, {'J', ".---"},
-    {'K', "-.-"}, {'L', ".-.."}, {'M', "--"}, {'N', "-."}, {'O', "---"},
-    {'P', ".--."}, {'Q', "--.-"}, {'R', ".-."}, {'S', "..."}, {'T', "-"},
-    {'U', "..-"}, {'V', "...-"}, {'W', ".--"}, {'X', "-..-"}, {'Y', "-.--"},
-    {'Z', "--.."}, {'0', "-----"}, {'1', ".----"}, {'2', "..---"}, {'3', "...--"},
-    {'4', "....-"}, {'5', "....."}, {'6', "-...."}, {'7', "--..."}, {'8', "---.."},
-    {'9', "----."}, {' ', " "}
-};
+    {'A', ".-"}, {'B', "-..."}, {'C', "-.-."}, {'D', "-.."}, {'E', "."}, {'F', "..-."}, {'G', "--."}, {'H', "...."}, {'I', ".."}, {'J', ".---"}, {'K', "-.-"}, {'L', ".-.."}, {'M', "--"}, {'N', "-."}, {'O', "---"}, {'P', ".--."}, {'Q', "--.-"}, {'R', ".-."}, {'S', "..."}, {'T', "-"}, {'U', "..-"}, {'V', "...-"}, {'W', ".--"}, {'X', "-..-"}, {'Y', "-.--"}, {'Z', "--.."}, {'0', "-----"}, {'1', ".----"}, {'2', "..---"}, {'3', "...--"}, {'4', "....-"}, {'5', "....."}, {'6', "-...."}, {'7', "--..."}, {'8', "---.."}, {'9', "----."}, {' ', " "}};
 
 const char *get_morse(char c)
 {
@@ -60,7 +53,7 @@ const char *get_morse(char c)
 uint8_t UartRxData;
 uint8_t UartRxbuf[1024], UartIntRxbuf[1024];
 uint16_t UartRxIndex = 0, UartRxFlag = 0, UartRxLen = 0, UartRxOKFlag = 0, UartIntRxLen = 0;
-volatile uint8_t WiFiStatus;   // 0=断开,1=连接
+volatile uint8_t WiFiStatus; // 0=断开,1=连接
 int8_t WiFiRSSI = 0;
 extern volatile uint8_t TcpClosedFlag;
 
@@ -99,13 +92,13 @@ int main(void)
 
     CabinetView_Init();
 
-    // MQTT 初始化
-    MQTT_Init(&mqttClient, MQTT_BROKER_HOST, MQTT_BROKER_PORT, "STM32_Client1", "cabinet.bridge.to.device");
-    MQTT_Connect(&mqttClient);
-    MQTT_Subscribe(&mqttClient);
-
     while (1) {
         uint32_t now = HAL_GetTick();
+
+        // MQTT 初始化
+        MQTT_Init(&mqttClient, MQTT_BROKER_HOST, MQTT_BROKER_PORT, "STM32_Client1", "cabinet.bridge.to.device");
+        MQTT_Connect(&mqttClient);
+        MQTT_Subscribe(&mqttClient);
 
         /* ---------- WiFi 重连任务 ---------- */
         ESP_WiFi_ReconnectTask();
@@ -153,8 +146,13 @@ int main(void)
                 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
                 HAL_Delay((uint32_t)(morse_state.duration * (1.0f - brightness)));
                 step += step_dir;
-                if (step >= BREATH_STEPS) { step_dir = -1; step = BREATH_STEPS - 1; }
-                else if (step <= 0) { step_dir = 1; step = 0; }
+                if (step >= BREATH_STEPS) {
+                    step_dir = -1;
+                    step     = BREATH_STEPS - 1;
+                } else if (step <= 0) {
+                    step_dir = 1;
+                    step     = 0;
+                }
 
                 static uint32_t symbol_delay_tick = 0;
                 static uint8_t symbol_delay_done  = 0;
@@ -214,8 +212,8 @@ int main(void)
         }
 
         /* ---------- MQTT处理 ---------- */
-        if (esp8266_rx_ok) {
-            esp8266_rx_ok = 0;
+        if (esp8266_rx_len>0) {
+            esp8266_rx_len = 0;
             MQTT_HandleIncomingData(&mqttClient, (char *)esp8266_rx_buf);
         }
 
@@ -240,21 +238,40 @@ int main(void)
 /* ================== UART回调 ================== */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
+    static char temp_line[ESP8266_LINE_MAX];
+    static uint16_t temp_len = 0;
+
     if (huart == &huart2) {
+        // 保存到通用缓冲
         UartIntRxbuf[UartRxIndex++] = UartRxData;
         if (UartRxIndex >= 1024) UartRxIndex = 0;
         UartIntRxLen = UartRxIndex;
         UartRxFlag   = 0x55;
         UartRxOKFlag = 0x55;
 
-        if (esp8266_rx_len < ESP8266_RX_MAX) {
-            esp8266_rx_buf[esp8266_rx_len++] = UartRxData;
-            if (UartRxData == '\n' || UartRxData == '\r' || UartRxData == '>') {
-                esp8266_rx_buf[esp8266_rx_len] = '\0';
-                esp8266_rx_ok                  = 1;
-                esp8266_rx_len                  = 0;
+        // ---- ESP8266环形缓冲接收 ----
+        if (temp_len < ESP8266_LINE_MAX - 1) {
+            temp_line[temp_len++] = UartRxData;
+
+            // 检测行结束
+            if (UartRxData == '\n' || UartRxData == '>' ) {
+                temp_line[temp_len] = '\0'; // 添加结尾
+                // 保存到环形缓冲
+                ESP8266_Line *pLine = &esp8266_lines[esp8266_line_write_index];
+                strncpy(pLine->line, temp_line, ESP8266_LINE_MAX);
+                pLine->len = temp_len;
+                pLine->ready = 1;
+
+                // 更新写入索引
+                esp8266_line_write_index++;
+                if (esp8266_line_write_index >= ESP8266_LINE_NUM) esp8266_line_write_index = 0;
+
+                // 清空临时行
+                temp_len = 0;
             }
         }
+
+        // 继续接收下一个字节
         HAL_UART_Receive_IT(&huart2, &UartRxData, 1);
     }
 }
