@@ -6,12 +6,13 @@
 #include "mqtt.h"
 
 /* ================= 全局状态 ================= */
-uint8_t  esp8266_rx_buf[ESP8266_RX_MAX];
-uint16_t esp8266_rx_len = 0;
+uint8_t esp8266_rx_buf[ESP8266_RX_MAX];
+uint16_t esp8266_rx_len        = 0;
 volatile uint8_t esp8266_rx_ok = 0;
 
 /* ================= 清空接收缓冲 ================= */
-void ESP8266_ClearRx(void) {
+void ESP8266_ClearRx(void)
+{
     esp8266_rx_len = 0;
     memset(esp8266_rx_buf, 0, ESP8266_RX_MAX);
 }
@@ -24,7 +25,7 @@ bool ESP8266_SendAndWait(const char *cmd, const char *ack, uint32_t timeout)
 
     uint32_t tick_start = HAL_GetTick();
     while ((HAL_GetTick() - tick_start) < timeout) {
-        if (strstr((char*)esp8266_rx_buf, ack)) {
+        if (strstr((char *)esp8266_rx_buf, ack)) {
             return true;
         }
     }
@@ -36,7 +37,7 @@ bool ESP8266_WaitReply(const char *ack, uint32_t timeout)
 {
     uint32_t tick_start = HAL_GetTick();
     while ((HAL_GetTick() - tick_start) < timeout) {
-        if (strstr((char*)esp8266_rx_buf, ack)) {
+        if (strstr((char *)esp8266_rx_buf, ack)) {
             return true;
         }
     }
@@ -90,6 +91,26 @@ bool ESP8266_TCP_Send(const char *data)
     return ESP8266_WaitReply("SEND OK", 1000);
 }
 
+bool ESP8266_SendRaw(uint8_t *data, uint16_t len)
+{
+    char cmd[32];
+
+    /* 1. 发送 CIPSEND */
+    sprintf(cmd, "AT+CIPSEND=%d\r\n", len);
+
+    if (!ESP8266_SendCmd(cmd, ">", 3000))
+        return false;
+
+    /* 2. 发送裸数据 */
+    HAL_UART_Transmit(&huart2, data, len, 1000);
+
+    /* 3. 等待 SEND OK */
+    if (!ESP8266_WaitResponse("SEND OK"))
+        return false;
+
+    return true;
+}
+
 /* ================= 透传模式 ================= */
 bool ESP8266_TCP_EnterTransparent(void)
 {
@@ -98,7 +119,7 @@ bool ESP8266_TCP_EnterTransparent(void)
 
 void ESP8266_TCP_ExitTransparent(void)
 {
-    ESP8266_SendString("+++");  // exit transparent mode
+    ESP8266_SendString("+++"); // exit transparent mode
 }
 
 /* ================= 串口中断接收 ================= */
@@ -109,7 +130,7 @@ void ESP8266_RxHandler(uint8_t ch)
         esp8266_rx_buf[esp8266_rx_len]   = '\0';
     }
 
-    if (ch == '\n') {  // 一行接收完成
+    if (ch == '\n') { // 一行接收完成
         esp8266_rx_ok = 1;
     }
 }
@@ -129,7 +150,7 @@ bool ESP8266_MQTT_HasMsg(void)
     return mqtt_new_msg;
 }
 
-char* ESP8266_MQTT_GetPayload(void)
+char *ESP8266_MQTT_GetPayload(void)
 {
     mqtt_new_msg = false;
     return mqtt_payload;
@@ -140,31 +161,33 @@ void ESP8266_MQTT_HandleIncomingData(const char *raw)
 {
     if (!raw) return;
 
-    if (raw[0] == '{') {  // JSON直接上报
+    if (raw[0] == '{') { // JSON直接上报
         strncpy(mqtt_payload, raw, MQTT_JSON_BUF_LEN - 1);
         mqtt_payload[MQTT_JSON_BUF_LEN - 1] = '\0';
-        mqtt_new_msg = true;
+        mqtt_new_msg                        = true;
         return;
     }
 
-    const char *json = strchr(raw, '{');  // AT +MQTTSUB
+    const char *json = strchr(raw, '{'); // AT +MQTTSUB
     if (json) {
         strncpy(mqtt_payload, json, MQTT_JSON_BUF_LEN - 1);
         mqtt_payload[MQTT_JSON_BUF_LEN - 1] = '\0';
-        mqtt_new_msg = true;
+        mqtt_new_msg                        = true;
     }
 }
 
 /* ================= 直接发送字符串 ================= */
 void ESP8266_SendString(const char *str)
 {
-    HAL_UART_Transmit(&ESP8266_UART, (uint8_t*)str, strlen(str), 1000);
+    HAL_UART_Transmit(&ESP8266_UART, (uint8_t *)str, strlen(str), 1000);
 }
 
-bool ESP8266_SendCmd(const char *cmd, const char *ack, uint32_t timeout) {
+bool ESP8266_SendCmd(const char *cmd, const char *ack, uint32_t timeout)
+{
     return ESP8266_SendAndWait(cmd, ack, timeout);
 }
 
-bool ESP8266_WaitResponse(const char *ack) {
+bool ESP8266_WaitResponse(const char *ack)
+{
     return ESP8266_WaitReply(ack, 5000); // 固定超时
 }

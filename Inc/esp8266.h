@@ -34,6 +34,7 @@ bool ESP8266_JoinAP(const char *ssid, const char *pwd);
 /* ================= TCP ================= */
 bool ESP8266_TCP_Connect(const char *ip, uint16_t port);
 bool ESP8266_TCP_Send(const char *data);
+bool ESP8266_SendRaw(uint8_t *data, uint16_t len);
 bool ESP8266_TCP_EnterTransparent(void);
 void ESP8266_TCP_ExitTransparent(void);
 void ESP8266_SendString(const char *str);

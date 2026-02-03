@@ -100,7 +100,7 @@ int main(void)
     CabinetView_Init();
 
     // MQTT ≥ı ºªØ
-    MQTT_Init(&mqttClient, "192.168.0.7", 1883, "STM32_Client1", "cabinet/device/status");
+    MQTT_Init(&mqttClient, "192.168.0.7", 1896, "STM32_Client1", "cabinet.bridge.to.device");
     MQTT_Connect(&mqttClient);
     MQTT_Subscribe(&mqttClient);
 
