@@ -54,41 +54,6 @@ void ESP8266_ClearRx(void)
     esp8266_line_read_index = esp8266_line_write_index;
 }
 
-/* ================= 字节 → 行（核心修复点） ================= */
-void ESP8266_RxHandler(uint8_t ch)
-{
-    /* 1?? 原始字节流（保留给 MQTT / TCP） */
-    if (esp8266_rx_len < ESP8266_RX_MAX - 1) {
-        esp8266_rx_buf[esp8266_rx_len++] = ch;
-        esp8266_rx_buf[esp8266_rx_len] = '\0';
-    }
-
-    /* 2?? 行模型（给 AT / SendAndWait 用） */
-    ESP8266_Line *line = &esp8266_lines[esp8266_line_write_index];
-
-    if (ch == '\n') {
-        line->line[line->len] = '\0';
-        line->ready = 1;
-
-        uint8_t next =
-            (esp8266_line_write_index + 1) % ESP8266_LINE_NUM;
-
-        /* 缓冲满，丢最旧一行 */
-        if (next == esp8266_line_read_index) {
-            esp8266_line_read_index =
-                (esp8266_line_read_index + 1) % ESP8266_LINE_NUM;
-        }
-
-        esp8266_line_write_index = next;
-        line->len = 0;
-    }
-    else if (ch != '\r') {
-        if (line->len < ESP8266_LINE_MAX - 1) {
-            line->line[line->len++] = ch;
-        }
-    }
-}
-
 /* ================= 串口发送 + 等待 ================= */
 bool ESP8266_SendAndWait(const char *cmd,
                          const char *ack,
@@ -274,4 +239,39 @@ void ESP8266_TCP_ExitTransparent(void)
 
     // 发送完后等待模块返回 OK
     ESP8266_SendAndWait("", "OK", 2000);
+}
+
+/* ================= 字节 → 行（核心修复点） ================= */
+void ESP8266_RxHandler(uint8_t ch)
+{
+    /* 1?? 原始字节流（保留给 MQTT / TCP） */
+    if (esp8266_rx_len < ESP8266_RX_MAX - 1) {
+        esp8266_rx_buf[esp8266_rx_len++] = ch;
+        esp8266_rx_buf[esp8266_rx_len] = '\0';
+    }
+
+    /* 2?? 行模型（给 AT / SendAndWait 用） */
+    ESP8266_Line *line = &esp8266_lines[esp8266_line_write_index];
+
+    if (ch == '\n') {
+        line->line[line->len] = '\0';
+        line->ready = 1;
+
+        uint8_t next =
+            (esp8266_line_write_index + 1) % ESP8266_LINE_NUM;
+
+        /* 缓冲满，丢最旧一行 */
+        if (next == esp8266_line_read_index) {
+            esp8266_line_read_index =
+                (esp8266_line_read_index + 1) % ESP8266_LINE_NUM;
+        }
+
+        esp8266_line_write_index = next;
+        line->len = 0;
+    }
+    else if (ch != '\r') {
+        if (line->len < ESP8266_LINE_MAX - 1) {
+            line->line[line->len++] = ch;
+        }
+    }
 }
