@@ -18,10 +18,10 @@
 #define SYMBOL_SPACE  DOT_DURATION
 #define LETTER_SPACE  (DOT_DURATION * 3)
 #define WORD_SPACE    (DOT_DURATION * 7)
-#define BREATH_STEPS  50       // 步数增加，亮度更明显
+#define BREATH_STEPS  50       // 呼吸步数
 #define PWM_INTERVAL  20       // ms 更新一次亮度
 
-/* =================== MQTT 参数 =================== */
+/* =================== MQTT 参数 ===================== */
 #define MQTT_JSON_BUF_LEN 128
 char mqtt_json_buf[MQTT_JSON_BUF_LEN] = {0};
 
@@ -58,9 +58,6 @@ const char *get_morse(char c)
     return "";
 }
 
-/* ================== WiFi 重连 ================== */
-#define WIFI_RECONNECT_INTERVAL 5000
-extern uint32_t wifi_reconnect_tick;
 void ESP_WiFi_ReconnectTask(void)
 {
     uint32_t now = HAL_GetTick();
@@ -79,39 +76,48 @@ extern TIM_HandleTypeDef htim3;
 void Morse_Breath_Update(void)
 {
     if (!morse_state.busy) {
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0); // 熄灭
         return;
     }
 
     uint32_t now = HAL_GetTick();
     char sym = morse_state.code[morse_state.index];
-    if (!sym) { morse_state.busy = 0; __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0); return; }
 
-    uint32_t duration = (sym == '.') ? DOT_DURATION : (sym == '-') ? DASH_DURATION : WORD_SPACE;
-
-    // 符号间隔结束
-    if (now - morse_state.tick_start >= duration + SYMBOL_SPACE) {
-        morse_state.index++;
-        morse_state.tick_start = now;
-        breath_step = 0;
-        breath_dir  = 1;
+    if (!sym) {
+        morse_state.busy = 0;
         __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
         return;
     }
 
-    // PWM 呼吸控制
+    uint32_t duration = (sym == '.') ? DOT_DURATION : (sym == '-') ? DASH_DURATION : WORD_SPACE;
+
+    // 判断符号是否结束
+    if (now - morse_state.tick_start >= duration + SYMBOL_SPACE) {
+        morse_state.index++;
+        morse_state.tick_start = now;
+        breath_step = 0;
+        breath_dir = 1;
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0); // 符号间隔灭灯
+        return;
+    }
+
+    // PWM 呼吸闪烁（点或划期间）
     if (now - last_pwm_tick >= PWM_INTERVAL) {
         last_pwm_tick = now;
-        float brightness = (float)breath_step / BREATH_STEPS;
-        if (brightness < 0.1f) brightness = 0.1f;  // 最小可见亮度
-        if (brightness > 1.0f) brightness = 1.0f;
+        if (sym == '.' || sym == '-') {
+            float brightness = (float)breath_step / BREATH_STEPS;
+            if (brightness < 0.1f) brightness = 0.1f;
+            if (brightness > 1.0f) brightness = 1.0f;
 
-        uint32_t ccr = (uint32_t)(brightness * (__HAL_TIM_GET_AUTORELOAD(&htim3)));
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, ccr);
+            uint32_t ccr = (uint32_t)(brightness * (__HAL_TIM_GET_AUTORELOAD(&htim3)));
+            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, ccr);
 
-        breath_step += breath_dir;
-        if (breath_step >= BREATH_STEPS) { breath_dir = -1; breath_step = BREATH_STEPS-1; }
-        else if (breath_step <= 0) { breath_dir = 1; breath_step = 0; }
+            breath_step += breath_dir;
+            if (breath_step >= BREATH_STEPS) { breath_dir = -1; breath_step = BREATH_STEPS-1; }
+            else if (breath_step <= 0) { breath_dir = 1; breath_step = 0; }
+        } else {
+            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0); // 空格熄灭
+        }
     }
 }
 
@@ -120,26 +126,37 @@ int main(void)
 {
     HAL_Init();
     SystemClock_Config();
+
+    /* GPIO 初始化 */
     MX_GPIO_Init();
+    // PA6 复用推挽 TIM3_CH1
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_6;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
     MX_USART2_UART_Init();
     MX_TIM3_Init();
-    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1); // 启动 PA6 PWM
 
     OLED_Init();
     OLED_Clear();
     ESP8266_Init();
     HAL_UART_Receive_IT(&huart2, &UartRxData, 1);
 
-    uint32_t last_morse_tick  = HAL_GetTick();
-    uint32_t last_led_tick    = HAL_GetTick();
-    uint32_t last_scroll_tick = HAL_GetTick();
-
+    wifi_reconnect_tick = HAL_GetTick(); // 初始时间
     CabinetView_Init();
 
     // MQTT 初始化
     MQTT_Init(&mqttClient, MQTT_BROKER_HOST, MQTT_BROKER_PORT, "STM32_Client1", "cabinet.bridge.to.device");
     MQTT_Connect(&mqttClient);
     MQTT_Subscribe(&mqttClient);
+
+    uint32_t last_morse_tick  = HAL_GetTick();
+    uint32_t last_scroll_tick = HAL_GetTick();
+    uint32_t last_led_tick    = HAL_GetTick();
 
     while (1) {
         uint32_t now = HAL_GetTick();
@@ -164,11 +181,11 @@ int main(void)
 
         /* ---------- 摩尔斯呼吸灯 ---------- */
         if (!morse_state.busy && now - last_morse_tick >= 5000 && WiFiStatus) {
-            morse_state.code      = get_morse('S');
-            morse_state.index     = 0;
-            morse_state.busy      = 1;
+            morse_state.code       = get_morse('S');
+            morse_state.index      = 0;
+            morse_state.busy       = 1;
             morse_state.tick_start = now;
-            last_morse_tick       = now;
+            last_morse_tick        = now;
             breath_step = 0;
             breath_dir  = 1;
         }
@@ -198,14 +215,6 @@ int main(void)
             UartRxIndex = 0;
         }
 
-        /* ---------- 板载 LED ---------- */
-        if (now - last_led_tick >= 50) {
-            last_led_tick = now;
-            if (!WiFiStatus) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-            else if (WiFiRSSI >= -50) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-            else HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-        }
-
         /* ---------- MQTT 处理 ---------- */
         MQTT_Yield(&mqttClient, 50);
         if (MQTT_MessageReceived(&mqttClient)) {
@@ -218,6 +227,14 @@ int main(void)
         /* ---------- OLED滚动 ---------- */
         CabinetView_ScrollTaskSmall(0);
         if (now - last_scroll_tick >= 300) { CabinetView_RotateDisplay(); last_scroll_tick = now; }
+
+        /* ---------- 板载 LED ---------- */
+        if (now - last_led_tick >= 50) {
+            last_led_tick = now;
+            if (!WiFiStatus) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+            else if (WiFiRSSI >= -50) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+            else HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+        }
 
         HAL_Delay(5);
     }
@@ -238,7 +255,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             if (UartRxData == '\n' || UartRxData == '\r' || UartRxData == '>') {
                 esp8266_rx_buf[esp8266_rx_len] = '\0';
                 esp8266_rx_ok                  = 1;
-                esp8266_rx_len                  = 0;
+                esp8266_rx_len                 = 0;
             }
         }
         HAL_UART_Receive_IT(&huart2, &UartRxData, 1);
