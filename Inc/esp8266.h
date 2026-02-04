@@ -34,7 +34,9 @@ extern int8_t WiFiRSSI;
 
 /* （保留给 MQTT / 原始数据用） */
 extern uint8_t  esp8266_rx_buf[ESP8266_RX_MAX];
-extern uint16_t esp8266_rx_len;
+extern volatile uint16_t esp8266_rx_len;
+/* ================== ESP8266 接收标志 ================== */
+extern volatile uint8_t esp8266_rx_ok;
 
 /* ================= WiFi / TCP ================= */
 typedef enum {

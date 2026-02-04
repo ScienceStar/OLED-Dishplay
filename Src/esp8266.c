@@ -24,7 +24,8 @@ int8_t WiFiRSSI = 0;
 
 /* 原始接收缓冲（给 MQTT / 透明数据用） */
 uint8_t  esp8266_rx_buf[ESP8266_RX_MAX];
-uint16_t esp8266_rx_len = 0;
+volatile uint16_t esp8266_rx_len = 0;
+volatile uint8_t esp8266_rx_ok = 0;
 
 /* ================= 初始化 ================= */
 bool ESP8266_Init(void)

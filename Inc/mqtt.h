@@ -37,6 +37,8 @@ bool MQTT_Init(MQTT_Client *client, const char *broker, uint16_t port,
  */
 bool MQTT_Connect(MQTT_Client *client);
 
+void MQTT_Yield(MQTT_Client *client, uint32_t timeout_ms);
+
 /**
  * 订阅指定 topic
  */

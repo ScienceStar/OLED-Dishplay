@@ -82,6 +82,36 @@ bool MQTT_Connect(MQTT_Client *client)
     return true;
 }
 
+/**
+ * @brief 轻量级 MQTT 循环处理函数
+ * @param client MQTT 客户端结构体
+ * @param timeout_ms 超时时间（毫秒）
+ * @note 这个函数用于代替 MQTT_Yield
+ */
+void MQTT_Yield(MQTT_Client *client, uint32_t timeout_ms)
+{
+    uint32_t start = HAL_GetTick();
+
+    while (HAL_GetTick() - start < timeout_ms)
+    {
+        // 如果ESP8266有接收到数据
+        if (esp8266_rx_len > 0)
+        {
+            // 拷贝数据到本地缓冲
+            uint16_t len = esp8266_rx_len;
+            if (len > 127) len = 127; // 限制缓冲
+            memcpy(client->json_buf, esp8266_rx_buf, len);
+            client->json_buf[len] = '\0';
+            esp8266_rx_len = 0;
+
+            // 标记有新消息
+            client->new_msg = true;
+        }
+
+        // 这里不做心跳，保持最简单
+    }
+}
+
 /* ================= 订阅 ================= */
 bool MQTT_Subscribe(MQTT_Client *client)
 {
