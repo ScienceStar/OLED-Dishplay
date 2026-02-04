@@ -102,7 +102,7 @@ int main(void)
         /* ---------- ×´Ì¬À¸ ---------- */
         char status_str[24];
         char wifi_char = 'X';
-        char tcp_char  = 'x';
+        char tcp_char  = 'X';
         char mqtt_char = 'X';
 
         if (WiFiStatus) {
