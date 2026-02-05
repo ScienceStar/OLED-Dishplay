@@ -49,10 +49,16 @@ bool ESP8266_Init(void);
 bool ESP8266_AT_Test(void);
 bool ESP8266_SetMode(ESP8266_Mode mode);
 bool ESP8266_JoinAP(const char *ssid, const char *pwd);
+bool ESP8266_IsWiFiConnected(void);
 bool ESP8266_GetRSSI(void);
 bool ESP8266_TCP_Connect(const char *ip, uint16_t port);
 bool ESP8266_TCP_Send(const char *data);
+bool ESP8266_TCP_Close(void);
 bool ESP8266_SendRaw(uint8_t *data, uint16_t len);
+bool ESP8266_SendString(const char *str);
+bool ESP8266_WaitResponse(const char *ack,
+                          uint32_t timeout);
+void ESP8266_ClearRx(void);
 
 /* ================= ºËÐÄ¹¤¾ß ================= */
 void ESP8266_ClearRx(void);

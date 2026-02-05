@@ -5,7 +5,7 @@
 #include "esp8266.h"
 
 /* ================== MQTT 客户端 ================== */
-MQTT_Client mqttClient;
+MQTT_Client mqttClient                = {0}; // 全部字段初始化为 0
 
 /* ================= 初始化 ================= */
 bool MQTT_Init(MQTT_Client *client,
@@ -60,23 +60,28 @@ bool MQTT_Connect(MQTT_Client *client)
 {
     if (!client) return false;
 
-   bool wifi_ok = ESP8266_JoinAP(WIFI_SSID, WIFI_PWD);
-    if (!wifi_ok) {
-        return false;
-    }
-    /* 1. TCP 连接 */
-    if (!ESP8266_TCP_Connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT))
+    /* 1. WiFi */
+    if (!ESP8266_JoinAP(WIFI_SSID, WIFI_PWD))
         return false;
 
-    /* 2. 发送 MQTT CONNECT 报文 */
+    /* 2. TCP */
+    if (!ESP8266_TCP_Connect(MQTT_BROKER_HOST,
+                             MQTT_BROKER_PORT))
+        return false;
+
+    /* 3. 清空缓冲 */
+    ESP8266_ClearRx(); // ← 用你现有函数名
+
+    /* 4. 发送 CONNECT */
     if (!ESP8266_SendRaw((uint8_t *)mqtt_connect_pkt,
-                         sizeof(mqtt_connect_pkt))) {
+                         sizeof(mqtt_connect_pkt)))
+        return false;
+
+    /* 5. 等 CONNACK */
+    if (!MQTT_Wait_CONNACK(3000)) {
+        ESP8266_TCP_Close();
         return false;
     }
-
-    /* 3. 等待 CONNACK */
-    if (!MQTT_Wait_CONNACK(3000))
-        return false;
 
     client->connected = true;
     return true;
@@ -92,17 +97,15 @@ void MQTT_Yield(MQTT_Client *client, uint32_t timeout_ms)
 {
     uint32_t start = HAL_GetTick();
 
-    while (HAL_GetTick() - start < timeout_ms)
-    {
+    while (HAL_GetTick() - start < timeout_ms) {
         // 如果ESP8266有接收到数据
-        if (esp8266_rx_len > 0)
-        {
+        if (esp8266_rx_len > 0) {
             // 拷贝数据到本地缓冲
             uint16_t len = esp8266_rx_len;
             if (len > 127) len = 127; // 限制缓冲
             memcpy(client->json_buf, esp8266_rx_buf, len);
             client->json_buf[len] = '\0';
-            esp8266_rx_len = 0;
+            esp8266_rx_len        = 0;
 
             // 标记有新消息
             client->new_msg = true;

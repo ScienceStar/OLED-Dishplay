@@ -38,15 +38,7 @@ typedef struct {
     const char *morse;
 } MorseMap;
 MorseMap morse_table[] = {
-    {'A', ".-"}, {'B', "-..."}, {'C', "-.-."}, {'D', "-.."}, {'E', "."},
-    {'F', "..-."}, {'G', "--."}, {'H', "...."}, {'I', ".."}, {'J', ".---"},
-    {'K', "-.-"}, {'L', ".-.."}, {'M', "--"}, {'N', "-."}, {'O', "---"},
-    {'P', ".--."}, {'Q', "--.-"}, {'R', ".-."}, {'S', "..."}, {'T', "-"},
-    {'U', "..-"}, {'V', "...-"}, {'W', ".--"}, {'X', "-..-"}, {'Y', "-.--"},
-    {'Z', "--.."}, {'0', "-----"}, {'1', ".----"}, {'2', "..---"}, {'3', "...--"},
-    {'4', "....-"}, {'5', "....."}, {'6', "-...."}, {'7', "--..."}, {'8', "---.."},
-    {'9', "----."}, {' ', " "}
-};
+    {'A', ".-"}, {'B', "-..."}, {'C', "-.-."}, {'D', "-.."}, {'E', "."}, {'F', "..-."}, {'G', "--."}, {'H', "...."}, {'I', ".."}, {'J', ".---"}, {'K', "-.-"}, {'L', ".-.."}, {'M', "--"}, {'N', "-."}, {'O', "---"}, {'P', ".--."}, {'Q', "--.-"}, {'R', ".-."}, {'S', "..."}, {'T', "-"}, {'U', "..-"}, {'V', "...-"}, {'W', ".--"}, {'X', "-..-"}, {'Y', "-.--"}, {'Z', "--.."}, {'0', "-----"}, {'1', ".----"}, {'2', "..---"}, {'3', "...--"}, {'4', "....-"}, {'5', "....."}, {'6', "-...."}, {'7', "--..."}, {'8', "---.."}, {'9', "----."}, {' ', " "}}; 
 
 const char *get_morse(char c)
 {
@@ -56,7 +48,6 @@ const char *get_morse(char c)
     return "";
 }
 
-#define WIFI_RECONNECT_INTERVAL 5000
 void ESP_WiFi_ReconnectTask(void)
 {
     uint32_t now = HAL_GetTick();
@@ -84,20 +75,32 @@ int main(void)
 
     CabinetView_Init();
 
-    // MQTT 初始化
-    MQTT_Init(&mqttClient, MQTT_BROKER_HOST, MQTT_BROKER_PORT, "STM32_Client1", "cabinet.bridge.to.device");
-    MQTT_Connect(&mqttClient);
-    MQTT_Subscribe(&mqttClient);
+    /* ---------- 初始化 MQTT 结构体 ---------- */
+    MQTT_Init(&mqttClient, MQTT_BROKER_HOST, MQTT_BROKER_PORT,
+              "STM32_Client1", "cabinet.bridge.to.device");
 
-    /* 摩尔斯呼吸灯步数 */
+    /* ---------- 主循环 ---------- */
+    static uint32_t mqtt_connect_tick = 0;
+    static uint32_t mqtt_reconnect_interval = 3000;
+
     static uint8_t breath_step = 0;
-    static int8_t breath_dir = 1;
+    static int8_t breath_dir   = 1;
 
     while (1) {
         uint32_t now = HAL_GetTick();
 
         /* ---------- WiFi重连 ---------- */
         ESP_WiFi_ReconnectTask();
+
+        /* ---------- MQTT自动连接 ---------- */
+        if (WiFiStatus && !mqttClient.connected &&
+            now - mqtt_connect_tick >= mqtt_reconnect_interval) 
+        {
+            mqtt_connect_tick = now;
+            if (MQTT_Connect(&mqttClient)) {
+                MQTT_Subscribe(&mqttClient);
+            }
+        }
 
         /* ---------- 状态栏 ---------- */
         char status_str[24];
@@ -106,9 +109,12 @@ int main(void)
         char mqtt_char = 'X';
 
         if (WiFiStatus) {
-            if (WiFiRSSI >= -50) wifi_char = '*';
-            else if (WiFiRSSI >= -70) wifi_char = '+';
-            else wifi_char = '.';
+            if (WiFiRSSI >= -50)
+                wifi_char = '*';
+            else if (WiFiRSSI >= -70)
+                wifi_char = '+';
+            else
+                wifi_char = '.';
         }
         if (!TcpClosedFlag && WiFiStatus) tcp_char = 'T';
         if (mqttClient.connected) mqtt_char = 'M';
@@ -136,13 +142,18 @@ int main(void)
             HAL_Delay((uint32_t)(morse_state.duration * (1.0f - brightness)));
 
             breath_step += breath_dir;
-            if (breath_step >= BREATH_STEPS) { breath_dir = -1; breath_step = BREATH_STEPS-1; }
-            else if (breath_step <= 0) { breath_dir = 1; breath_step = 0; }
+            if (breath_step >= BREATH_STEPS) {
+                breath_dir  = -1;
+                breath_step = BREATH_STEPS - 1;
+            } else if (breath_step <= 0) {
+                breath_dir  = 1;
+                breath_step = 0;
+            }
 
             static uint32_t symbol_delay_tick = 0;
-            static uint8_t symbol_done = 0;
+            static uint8_t symbol_done        = 0;
             if (!symbol_done && breath_step == 0) {
-                symbol_done = 1;
+                symbol_done       = 1;
                 symbol_delay_tick = HAL_GetTick();
             }
             if (symbol_done && HAL_GetTick() - symbol_delay_tick >= SYMBOL_SPACE) {
@@ -162,18 +173,20 @@ int main(void)
         /* ---------- UART接收ESP8266 ---------- */
         if (UartRxOKFlag == 0x55) {
             UartRxOKFlag = 0;
-            UartRxLen = UartIntRxLen;
+            UartRxLen    = UartIntRxLen;
             memcpy(UartRxbuf, UartIntRxbuf, UartIntRxLen);
             UartIntRxLen = 0;
 
-            if (strstr((char *)UartRxbuf, "WIFI CONNECTED")) WiFiStatus = 1;
-            else if (strstr((char *)UartRxbuf, "WIFI DISCONNECTED")) WiFiStatus = 0;
+            if (strstr((char *)UartRxbuf, "WIFI CONNECTED"))
+                WiFiStatus = 1;
+            else if (strstr((char *)UartRxbuf, "WIFI DISCONNECTED"))
+                WiFiStatus = 0;
 
             char *rssi_ptr = strstr((char *)UartRxbuf, "+CWJAP:");
             if (rssi_ptr) WiFiRSSI = atoi(rssi_ptr + 7);
 
             if (strstr((char *)UartRxbuf, "CLOSED\r\n")) {
-                TcpClosedFlag = 1;
+                TcpClosedFlag        = 1;
                 mqttClient.connected = 0;
             }
             UartRxIndex = 0;
@@ -182,18 +195,22 @@ int main(void)
         /* ---------- ESP8266板载LED（PC13） ---------- */
         if (now - last_led_tick >= 50) {
             last_led_tick = now;
-            if (!WiFiStatus) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-            else if (WiFiRSSI >= -50) HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-            else if (WiFiRSSI >= -70) HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-            else HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+            if (!WiFiStatus)
+                HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+            else if (WiFiRSSI >= -50)
+                HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+            else if (WiFiRSSI >= -70)
+                HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+            else
+                HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
         }
 
         /* ---------- MQTT处理 ---------- */
         MQTT_Yield(&mqttClient, 50);
         if (MQTT_MessageReceived(&mqttClient)) {
             char json_local[MQTT_JSON_BUF_LEN];
-            strncpy(json_local, mqttClient.json_buf, MQTT_JSON_BUF_LEN-1);
-            json_local[MQTT_JSON_BUF_LEN-1] = '\0';
+            strncpy(json_local, mqttClient.json_buf, MQTT_JSON_BUF_LEN - 1);
+            json_local[MQTT_JSON_BUF_LEN - 1] = '\0';
             CabinetView_UpdateFromJson(json_local);
         }
 
@@ -212,18 +229,14 @@ int main(void)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart == &huart2) {
-
-        /* ===== 1. 旧系统缓存 ===== */
         UartIntRxbuf[UartRxIndex++] = UartRxData;
         if (UartRxIndex >= 1024) UartRxIndex = 0;
         UartIntRxLen = UartRxIndex;
         UartRxFlag   = 0x55;
         UartRxOKFlag = 0x55;
 
-        /* ===== 2. 喂给 ESP8266 行模型 ===== */
-        ESP8266_RxHandler(UartRxData);   // ★★★★★关键缺失
+        ESP8266_RxHandler(UartRxData); // ★ 保证 WiFiStatus 正确更新
 
-        /* ===== 3. 重启接收 ===== */
         HAL_UART_Receive_IT(&huart2, &UartRxData, 1);
     }
 }

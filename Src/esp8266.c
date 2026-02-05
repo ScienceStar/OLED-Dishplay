@@ -45,16 +45,6 @@ bool ESP8266_Init(void)
     return true;
 }
 
-/* ================= 清空接收（只动行缓冲） ================= */
-void ESP8266_ClearRx(void)
-{
-    for (int i = 0; i < ESP8266_LINE_NUM; i++) {
-        esp8266_lines[i].ready = 0;
-        esp8266_lines[i].len   = 0;
-    }
-    esp8266_line_read_index = esp8266_line_write_index;
-}
-
 /* ================= 串口发送 + 等待 ================= */
 bool ESP8266_SendAndWait(const char *cmd,
                          const char *ack,
@@ -114,6 +104,11 @@ bool ESP8266_JoinAP(const char *ssid, const char *pwd)
     char cmd[128];
     sprintf(cmd, "AT+CWJAP=\"%s\",\"%s\"\r\n", ssid, pwd);
     return ESP8266_SendAndWait(cmd, "WIFI GOT IP", 8000);
+}
+
+bool ESP8266_IsWiFiConnected(void)
+{
+    return strstr((char *)esp8266_rx_buf, "WIFI GOT IP") != NULL;
 }
 
 bool ESP8266_GetRSSI(void)
@@ -191,6 +186,21 @@ bool ESP8266_TCP_Send(const char *data)
     return ESP8266_SendAndWait("", "SEND OK", 3000);
 }
 
+bool ESP8266_TCP_Close(void)
+{
+    /* 清接收缓冲 */
+    ESP8266_ClearRx();
+
+    /* 发送关闭指令 */
+    ESP8266_SendString("AT+CIPCLOSE\r\n");
+
+    /* 等待 OK */
+    if (ESP8266_WaitResponse("OK", 2000))
+        return true;
+
+    return false;
+}
+
 /* ================= 发送原始二进制数据 ================= */
 bool ESP8266_SendRaw(uint8_t *data, uint16_t len)
 {
@@ -213,6 +223,54 @@ bool ESP8266_SendRaw(uint8_t *data, uint16_t len)
         return false;
 
     return true;
+}
+
+/**
+ * @brief  发送 AT 字符串指令
+ * @param  str 要发送的字符串（不自动加 \r\n）
+ * @retval true 发送成功
+ *         false 发送失败
+ */
+bool ESP8266_SendString(const char *str)
+{
+    if (str == NULL)
+        return false;
+
+    uint16_t len = strlen(str);
+
+    return ESP8266_SendRaw((uint8_t *)str, len);
+}
+
+/**
+ * @brief  等待 ESP8266 返回关键字
+ * @param  ack      关键字，如 "OK" / "ERROR"
+ * @param  timeout  超时(ms)
+ * @retval true  收到
+ *         false 超时
+ */
+bool ESP8266_WaitResponse(const char *ack,
+                          uint32_t timeout)
+{
+    if (ack == NULL)
+        return false;
+
+    uint32_t start = HAL_GetTick();
+
+    while (HAL_GetTick() - start < timeout)
+    {
+        if (strstr((char *)esp8266_rx_buf, ack) != NULL)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void ESP8266_ClearRx(void)
+{
+    memset(esp8266_rx_buf, 0, sizeof(esp8266_rx_buf));
+    esp8266_rx_len = 0;
 }
 
 /* ================= 进入透传模式 ================= */
