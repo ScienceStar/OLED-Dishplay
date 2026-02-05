@@ -212,20 +212,18 @@ int main(void)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart == &huart2) {
+
+        /* ===== 1. 旧系统缓存 ===== */
         UartIntRxbuf[UartRxIndex++] = UartRxData;
         if (UartRxIndex >= 1024) UartRxIndex = 0;
         UartIntRxLen = UartRxIndex;
         UartRxFlag   = 0x55;
         UartRxOKFlag = 0x55;
 
-        if (esp8266_rx_len < ESP8266_RX_MAX) {
-            esp8266_rx_buf[esp8266_rx_len++] = UartRxData;
-            if (UartRxData == '\n' || UartRxData == '\r' || UartRxData == '>') {
-                esp8266_rx_buf[esp8266_rx_len] = '\0';
-                esp8266_rx_ok                  = 1;
-                esp8266_rx_len                  = 0;
-            }
-        }
+        /* ===== 2. 喂给 ESP8266 行模型 ===== */
+        ESP8266_RxHandler(UartRxData);   // ★★★★★关键缺失
+
+        /* ===== 3. 重启接收 ===== */
         HAL_UART_Receive_IT(&huart2, &UartRxData, 1);
     }
 }

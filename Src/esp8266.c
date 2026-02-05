@@ -245,67 +245,70 @@ void ESP8266_TCP_ExitTransparent(void)
 /* ================= 字节 → 行（核心修复点） ================= */
 void ESP8266_RxHandler(uint8_t ch)
 {
-    /* ================= 1?? 原始字节流（MQTT / TCP 用） ================= */
+    /* ===== 1. 原始流 ===== */
+
     if (esp8266_rx_len < ESP8266_RX_MAX - 1) {
         esp8266_rx_buf[esp8266_rx_len++] = ch;
         esp8266_rx_buf[esp8266_rx_len] = '\0';
-    } else {
-        /* 缓冲满，安全回卷（避免永久失效） */
-        esp8266_rx_len = 0;
     }
 
-    /* ================= 2?? 行模型（AT / SendAndWait 用） ================= */
-    ESP8266_Line *line = &esp8266_lines[esp8266_line_write_index];
+    /* ===== 2. 行模型 ===== */
 
-    /* 2.1 特殊处理 '>'（CIPSEND Prompt） */
+    ESP8266_Line *line =
+        &esp8266_lines[esp8266_line_write_index];
+
+    /* ---- Prompt '>' ---- */
     if (ch == '>') {
-        line->line[0] = '>';
-        line->line[1] = '\0';
-        line->len   = 1;
+
+        line->len = 0;
+        line->line[line->len++] = '>';
+        line->line[line->len]   = '\0';
         line->ready = 1;
 
-        uint8_t next = (esp8266_line_write_index + 1) % ESP8266_LINE_NUM;
-        if (next == esp8266_line_read_index) {
-            esp8266_line_read_index =
-                (esp8266_line_read_index + 1) % ESP8266_LINE_NUM;
-        }
-        esp8266_line_write_index = next;
-        return;
+        goto NEXT_LINE;
     }
 
-    /* 2.2 行结束（\n） */
+    /* ---- 忽略 \r ---- */
+    if (ch == '\r')
+        return;
+
+    /* ---- 行结束 ---- */
     if (ch == '\n') {
+
+        if (line->len == 0)
+            return;   // 忽略空行
+
         line->line[line->len] = '\0';
         line->ready = 1;
 
-        uint8_t next = (esp8266_line_write_index + 1) % ESP8266_LINE_NUM;
-        if (next == esp8266_line_read_index) {
-            esp8266_line_read_index =
-                (esp8266_line_read_index + 1) % ESP8266_LINE_NUM;
-        }
-
-        /* ?? 切换到下一行 */
-        esp8266_line_write_index = next;
-        esp8266_lines[esp8266_line_write_index].len = 0;
-        return;
+        goto NEXT_LINE;
     }
 
-    /* 2.3 普通字符（忽略 \r） */
-    if (ch != '\r') {
-        if (line->len < ESP8266_LINE_MAX - 1) {
-            line->line[line->len++] = ch;
-        } else {
-            /* 行过长，强制结束（防止污染下一行） */
-            line->line[line->len] = '\0';
-            line->ready = 1;
-
-            uint8_t next = (esp8266_line_write_index + 1) % ESP8266_LINE_NUM;
-            if (next == esp8266_line_read_index) {
-                esp8266_line_read_index =
-                    (esp8266_line_read_index + 1) % ESP8266_LINE_NUM;
-            }
-            esp8266_line_write_index = next;
-            esp8266_lines[esp8266_line_write_index].len = 0;
-        }
+    /* ---- 普通字符 ---- */
+    if (line->len < ESP8266_LINE_MAX - 1) {
+        line->line[line->len++] = ch;
     }
+
+    return;
+
+
+/* ===== 切行 ===== */
+NEXT_LINE:
+
+    uint8_t next =
+        (esp8266_line_write_index + 1) % ESP8266_LINE_NUM;
+
+    if (next == esp8266_line_read_index) {
+        esp8266_line_read_index =
+            (esp8266_line_read_index + 1) % ESP8266_LINE_NUM;
+    }
+
+    esp8266_line_write_index = next;
+
+    ESP8266_Line *nline =
+        &esp8266_lines[esp8266_line_write_index];
+
+    nline->len   = 0;
+    nline->ready = 0;
+    nline->line[0] = '\0';
 }
