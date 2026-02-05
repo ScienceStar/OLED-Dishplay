@@ -23,9 +23,9 @@ volatile uint8_t WiFiStatus; // 0=断开,1=连接
 int8_t WiFiRSSI = 0;
 
 /* 原始接收缓冲（给 MQTT / 透明数据用） */
-uint8_t  esp8266_rx_buf[ESP8266_RX_MAX];
+uint8_t esp8266_rx_buf[ESP8266_RX_MAX];
 volatile uint16_t esp8266_rx_len = 0;
-volatile uint8_t esp8266_rx_ok = 0;
+volatile uint8_t esp8266_rx_ok   = 0;
 
 /* ================= 初始化 ================= */
 bool ESP8266_Init(void)
@@ -35,8 +35,8 @@ bool ESP8266_Init(void)
     esp8266_rx_len           = 0;
 
     for (int i = 0; i < ESP8266_LINE_NUM; i++) {
-        esp8266_lines[i].ready = 0;
-        esp8266_lines[i].len   = 0;
+        esp8266_lines[i].ready   = 0;
+        esp8266_lines[i].len     = 0;
         esp8266_lines[i].line[0] = '\0';
     }
 
@@ -50,40 +50,38 @@ bool ESP8266_SendAndWait(const char *cmd,
                          const char *ack,
                          uint32_t timeout)
 {
-    ESP8266_ClearRx();
+    ESP8266_ClearRx(); // 清空全局接收缓冲区
 
     HAL_UART_Transmit(&ESP8266_UART,
                       (uint8_t *)cmd,
                       strlen(cmd),
                       1000);
 
-    uint32_t start = HAL_GetTick();
+    uint32_t start   = HAL_GetTick();
+    uint32_t ack_len = strlen(ack);
+    uint32_t matched = 0;
 
     while ((HAL_GetTick() - start) < timeout) {
+        if (esp8266_rx_len > 0) {
+            uint8_t ch = esp8266_rx_buf[0];
+            // 左移整个缓冲区
+            memmove(esp8266_rx_buf, esp8266_rx_buf + 1, esp8266_rx_len - 1);
+            esp8266_rx_len--;
 
-        if (esp8266_lines[esp8266_line_read_index].ready) {
-
-            ESP8266_Line *line =
-                &esp8266_lines[esp8266_line_read_index];
-
-            printf("[ESP] %s\n", line->line);
-
-            if (strstr(line->line, ack)) {
-                line->ready = 0;
-                esp8266_line_read_index =
-                    (esp8266_line_read_index + 1) % ESP8266_LINE_NUM;
-                return true;
+            if (ch == ack[matched]) {
+                matched++;
+                if (matched == ack_len) {
+                    return true; // 匹配成功
+                }
+            } else {
+                matched = 0; // 重置匹配
             }
-
-            line->ready = 0;
-            esp8266_line_read_index =
-                (esp8266_line_read_index + 1) % ESP8266_LINE_NUM;
         } else {
             HAL_Delay(1);
         }
     }
 
-    return false;
+    return false; // 超时
 }
 
 /* ================= AT / WiFi / TCP ================= */
@@ -256,10 +254,8 @@ bool ESP8266_WaitResponse(const char *ack,
 
     uint32_t start = HAL_GetTick();
 
-    while (HAL_GetTick() - start < timeout)
-    {
-        if (strstr((char *)esp8266_rx_buf, ack) != NULL)
-        {
+    while (HAL_GetTick() - start < timeout) {
+        if (strstr((char *)esp8266_rx_buf, ack) != NULL) {
             return true;
         }
     }
@@ -307,7 +303,7 @@ void ESP8266_RxHandler(uint8_t ch)
 
     if (esp8266_rx_len < ESP8266_RX_MAX - 1) {
         esp8266_rx_buf[esp8266_rx_len++] = ch;
-        esp8266_rx_buf[esp8266_rx_len] = '\0';
+        esp8266_rx_buf[esp8266_rx_len]   = '\0';
     }
 
     /* ===== 2. 行模型 ===== */
@@ -318,10 +314,10 @@ void ESP8266_RxHandler(uint8_t ch)
     /* ---- Prompt '>' ---- */
     if (ch == '>') {
 
-        line->len = 0;
+        line->len               = 0;
         line->line[line->len++] = '>';
         line->line[line->len]   = '\0';
-        line->ready = 1;
+        line->ready             = 1;
 
         goto NEXT_LINE;
     }
@@ -334,10 +330,10 @@ void ESP8266_RxHandler(uint8_t ch)
     if (ch == '\n') {
 
         if (line->len == 0)
-            return;   // 忽略空行
+            return; // 忽略空行
 
         line->line[line->len] = '\0';
-        line->ready = 1;
+        line->ready           = 1;
 
         goto NEXT_LINE;
     }
@@ -348,7 +344,6 @@ void ESP8266_RxHandler(uint8_t ch)
     }
 
     return;
-
 
 /* ===== 切行 ===== */
 NEXT_LINE:
@@ -366,7 +361,7 @@ NEXT_LINE:
     ESP8266_Line *nline =
         &esp8266_lines[esp8266_line_write_index];
 
-    nline->len   = 0;
-    nline->ready = 0;
+    nline->len     = 0;
+    nline->ready   = 0;
     nline->line[0] = '\0';
 }
