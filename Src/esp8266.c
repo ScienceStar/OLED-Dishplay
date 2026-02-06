@@ -1,5 +1,6 @@
 #include "esp8266.h"
 #include "usart.h"
+#include "tcp.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -197,6 +198,49 @@ bool ESP8266_TCP_Close(void)
         return true;
 
     return false;
+}
+
+/* ================= WiFi重连 ================= */
+#define WIFI_RECONNECT_INTERVAL 5000
+
+void ESP_WiFi_ReconnectTask(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    if (!WiFiStatus &&
+        now - wifi_reconnect_tick >= WIFI_RECONNECT_INTERVAL)
+    {
+        wifi_reconnect_tick = now;
+        ESP8266_JoinAP(WIFI_SSID, WIFI_PWD);
+    }
+}
+
+/* WiFi连接状态标志 */
+static uint8_t wifi_connected = 0;
+
+/**
+ * @brief  判断ESP8266是否已连接WiFi
+ * @retval 1=已连接  0=未连接
+ */
+uint8_t ESP8266_IsConnected(void)
+{
+    /* ---------- 已连接特征 ---------- */
+    if (strstr((char *)esp8266_rx_buf, "WIFI GOT IP") ||
+        strstr((char *)esp8266_rx_buf, "STAIP") ||
+        strstr((char *)esp8266_rx_buf, "CONNECTED")) {
+
+        wifi_connected = 1;
+    }
+
+    /* ---------- 断开特征 ---------- */
+    if (strstr((char *)esp8266_rx_buf, "WIFI DISCONNECT") ||
+        strstr((char *)esp8266_rx_buf, "DISCONNECT") ||
+        strstr((char *)esp8266_rx_buf, "ERROR")) {
+
+        wifi_connected = 0;
+    }
+
+    return wifi_connected;
 }
 
 /* ================= 发送原始二进制数据 ================= */

@@ -3,7 +3,7 @@
 #include "stm32f1xx_hal.h"
 #include <stdio.h>
 
-volatile uint8_t TcpClosedFlag = 0;
+volatile uint8_t TcpClosedFlag = 1;
 
 typedef enum
 {
@@ -21,56 +21,59 @@ static uint32_t last_tick = 0;
 static uint32_t last_send_tick = 0;
 #define TCP_SEND_INTERVAL 1000 // 每1000ms发送一次
 static uint32_t last_heartbeat_tick = 0;
+
+/* ================= 独立计时器 ================= */
+static uint32_t last_at_tick      = 0;
+static uint32_t last_wifi_tick    = 0;
+static uint32_t last_connect_tick = 0;
+
 void TCP_Task(void)
 {
     uint32_t now = HAL_GetTick();
-    if (now - last_tick < 500)
-        return;
-    last_tick = now;
 
     switch (tcp_state)
     {
     case TCP_IDLE:
-        if (ESP8266_AT_Test())
-        {
-            tcp_state = TCP_WIFI;
-            retry_count = 0;
+        if (now - last_at_tick >= 500) { // AT测试每500ms
+            last_at_tick = now;
+            if (ESP8266_AT_Test()) {
+                tcp_state = TCP_WIFI;
+                retry_count = 0;
+            }
         }
         break;
 
     case TCP_WIFI:
-        if (ESP8266_SetMode(STA))
-        {
-            if (ESP8266_JoinAP(WIFI_SSID, WIFI_PWD))
-            {
-                tcp_state = TCP_CONNECT;
+        if (now - last_wifi_tick >= 500) { // 设置模式/连接AP每500ms
+            last_wifi_tick = now;
+            if (ESP8266_SetMode(STA)) {
+                if (ESP8266_JoinAP(WIFI_SSID, WIFI_PWD)) {
+                    tcp_state = TCP_CONNECT;
+                    retry_count = 0;
+                }
+            } else if (++retry_count >= 3) {
+                tcp_state = TCP_IDLE;
                 retry_count = 0;
             }
-        }
-        else if (++retry_count >= 3)
-        {
-            tcp_state = TCP_IDLE;
-            retry_count = 0;
         }
         break;
 
     case TCP_CONNECT:
-        if (ESP8266_TCP_Connect(TCP_SERVER_IP, TCP_SERVER_PORT))
-        {
-            tcp_state = TCP_WORK;
-            TcpClosedFlag = 0;
-            retry_count = 0;
-        }
-        else if (++retry_count >= 3)
-        {
-            tcp_state = TCP_WIFI;
-            retry_count = 0;
+        if (now - last_connect_tick >= 500) { // TCP连接尝试每500ms
+            last_connect_tick = now;
+            if (ESP8266_TCP_Connect(TCP_SERVER_IP, TCP_SERVER_PORT)) {
+                tcp_state = TCP_WORK;
+                TcpClosedFlag = 0;
+                retry_count = 0;
+            } else if (++retry_count >= 3) {
+                tcp_state = TCP_WIFI;
+                retry_count = 0;
+            }
         }
         break;
 
     case TCP_WORK:
-        if (TcpClosedFlag)
-        {
+        if (TcpClosedFlag) {
             tcp_state = TCP_IDLE;
             TcpClosedFlag = 0;
         }
