@@ -79,6 +79,15 @@ bool MQTT_Connect(MQTT_Client *client)
 
     /* 5. 等 CONNACK */
     if (!MQTT_Wait_CONNACK(1000)) {
+        /* 打印调试信息，帮助定位为何未收到 CONNACK */
+        printf("[MQTT] CONNACK timeout, esp8266_rx_len=%u\n", esp8266_rx_len);
+        if (esp8266_rx_len > 0) {
+            printf("[MQTT] esp8266_rx_buf(hex):");
+            for (uint16_t i = 0; i < esp8266_rx_len && i < 64; i++) {
+                printf(" %02X", esp8266_rx_buf[i]);
+            }
+            printf("\n");
+        }
         ESP8266_TCP_Close();
         return false;
     }
