@@ -41,8 +41,8 @@ bool ESP8266_Init(void)
         esp8266_lines[i].line[0] = '\0';
     }
 
-    /* UART 接收常开（只启动一次） */
-    HAL_UART_Receive_IT(&ESP8266_UART, &esp8266_rx_byte, 1);
+    /* UART 由 main 统一启动接收，回调会转发给 ESP8266_RxHandler */
+    /* 避免重复启动接收导致缓冲冲突 */
     return true;
 }
 

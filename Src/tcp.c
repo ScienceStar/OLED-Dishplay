@@ -3,7 +3,7 @@
 #include "stm32f1xx_hal.h"
 #include <stdio.h>
 
-volatile uint8_t TcpClosedFlag = 1;
+volatile uint8_t TcpClosedFlag = 0;
 
 typedef enum
 {
