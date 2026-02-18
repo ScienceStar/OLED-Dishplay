@@ -102,7 +102,8 @@ bool ESP8266_JoinAP(const char *ssid, const char *pwd)
 {
     char cmd[128];
     sprintf(cmd, "AT+CWJAP=\"%s\",\"%s\"\r\n", ssid, pwd);
-    return ESP8266_SendAndWait(cmd, "WIFI GOT IP", 8000);
+    /* 减少超时以避免主循环被长时间阻塞 */
+    return ESP8266_SendAndWait(cmd, "WIFI GOT IP", 3000);
 }
 
 bool ESP8266_IsWiFiConnected(void)
@@ -166,7 +167,14 @@ bool ESP8266_TCP_Connect(const char *ip, uint16_t port)
 {
     char cmd[64];
     sprintf(cmd, "AT+CIPSTART=\"TCP\",\"%s\",%d\r\n", ip, port);
-    return ESP8266_SendAndWait(cmd, "CONNECT", 5000);
+    /* 先短等待 CONNECT，再检查是否包含 FAIL/ERROR */
+    if (!ESP8266_SendAndWait(cmd, "CONNECT", 2000))
+        return false;
+
+    if (strstr((char *)esp8266_rx_buf, "FAIL") || strstr((char *)esp8266_rx_buf, "ERROR"))
+        return false;
+
+    return true;
 }
 
 bool ESP8266_TCP_Send(const char *data)
@@ -174,7 +182,7 @@ bool ESP8266_TCP_Send(const char *data)
     char cmd[32];
     sprintf(cmd, "AT+CIPSEND=%d\r\n", (int)strlen(data));
 
-    if (!ESP8266_SendAndWait(cmd, ">", 2000))
+    if (!ESP8266_SendAndWait(cmd, ">", 1000))
         return false;
 
     HAL_UART_Transmit(&ESP8266_UART,
@@ -182,7 +190,7 @@ bool ESP8266_TCP_Send(const char *data)
                       strlen(data),
                       1000);
 
-    return ESP8266_SendAndWait("", "SEND OK", 3000);
+    return ESP8266_SendAndWait("", "SEND OK", 1000);
 }
 
 bool ESP8266_TCP_Close(void)

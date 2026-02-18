@@ -78,7 +78,7 @@ bool MQTT_Connect(MQTT_Client *client)
         return false;
 
     /* 5. 等 CONNACK */
-    if (!MQTT_Wait_CONNACK(3000)) {
+    if (!MQTT_Wait_CONNACK(1000)) {
         ESP8266_TCP_Close();
         return false;
     }
@@ -209,12 +209,24 @@ bool MQTT_Wait_CONNACK(uint32_t timeout_ms)
 
     while (HAL_GetTick() - tick < timeout_ms) {
         if (esp8266_rx_len >= 4) {
-            uint8_t *buf = esp8266_rx_buf;
-
-            // CONNACK: 20 02 00 00
-            if (buf[0] == 0x20 && buf[1] == 0x02 && buf[3] == 0x00)
-                return true;
+            // 扫描接收缓冲，查找 CONNACK 二进制帧（可能被 +IPD 包裹）
+            for (uint16_t i = 0; i + 4 <= esp8266_rx_len; i++) {
+                uint8_t *p = &esp8266_rx_buf[i];
+                // CONNACK 固定报头 0x20, 剩余长度 0x02, 第二字节后的返回码在 p[3]
+                if (p[0] == 0x20 && p[1] == 0x02 && p[3] == 0x00) {
+                    // 消费掉缓冲中已检测到的数据，避免重复处理
+                    if (i + 4 < esp8266_rx_len) {
+                        // 将剩余数据前移
+                        memmove(esp8266_rx_buf, esp8266_rx_buf + i + 4, esp8266_rx_len - (i + 4));
+                        esp8266_rx_len -= (i + 4);
+                    } else {
+                        esp8266_rx_len = 0;
+                    }
+                    return true;
+                }
+            }
         }
     }
+
     return false;
 }
