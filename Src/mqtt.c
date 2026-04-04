@@ -55,31 +55,22 @@ static const uint8_t mqtt_connect_pkt[] = {
     0x00, 0x04, 't', 'e', 's', 't' // ClientID = "test"
 };
 
+#define MQTT_CONNECT_PKT_SIZE sizeof(mqtt_connect_pkt)
+
 /* ================= 连接（逻辑） ================= */
 bool MQTT_Connect(MQTT_Client *client)
 {
     if (!client) return false;
 
-    /* 1. WiFi */
-    if (!ESP8266_JoinAP(WIFI_SSID, WIFI_PWD))
+    /* Clear buffer */
+    ESP8266_ClearRx();
+
+    /* Send CONNECT packet */
+    if (!ESP8266_SendRaw((uint8_t *)mqtt_connect_pkt, MQTT_CONNECT_PKT_SIZE))
         return false;
 
-    /* 2. TCP */
-    if (!ESP8266_TCP_Connect(MQTT_BROKER_HOST,
-                             MQTT_BROKER_PORT))
-        return false;
-
-    /* 3. 清空缓冲 */
-    ESP8266_ClearRx(); // ← 用你现有函数名
-
-    /* 4. 发送 CONNECT */
-    if (!ESP8266_SendRaw((uint8_t *)mqtt_connect_pkt,
-                         sizeof(mqtt_connect_pkt)))
-        return false;
-
-    /* 5. 等 CONNACK */
-    if (!MQTT_Wait_CONNACK(1000)) {
-        /* 打印调试信息，帮助定位为何未收到 CONNACK */
+    /* Wait for CONNACK */
+    if (!MQTT_Wait_CONNACK(3000)) {
         printf("[MQTT] CONNACK timeout, esp8266_rx_len=%u\n", esp8266_rx_len);
         if (esp8266_rx_len > 0) {
             printf("[MQTT] esp8266_rx_buf(hex):");
@@ -88,12 +79,21 @@ bool MQTT_Connect(MQTT_Client *client)
             }
             printf("\n");
         }
-        ESP8266_TCP_Close();
         return false;
     }
 
     client->connected = true;
     return true;
+}
+
+/**
+ * @brief 直接发送MQTT CONNECT包（不重新连接WiFi/TCP）
+ * @return true 成功, false 失败
+ */
+bool MQTT_SendConnectPacket(void)
+{
+    ESP8266_ClearRx();
+    return ESP8266_SendRaw((uint8_t *)mqtt_connect_pkt, MQTT_CONNECT_PKT_SIZE);
 }
 
 /**
@@ -235,6 +235,8 @@ bool MQTT_Wait_CONNACK(uint32_t timeout_ms)
                 }
             }
         }
+        // Small delay to prevent busy waiting
+        HAL_Delay(1);
     }
 
     return false;

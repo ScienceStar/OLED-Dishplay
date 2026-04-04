@@ -1,0 +1,11 @@
+CompileFlags:
+  Add:
+    - -I/Applications/ArmGNUToolchain/15.2.rel1/arm-none-eabi/arm-none-eabi/include/c++/15.2.1
+    - -I/Applications/ArmGNUToolchain/15.2.rel1/arm-none-eabi/arm-none-eabi/include/c++/15.2.1/arm-none-eabi/thumb/v7-m/nofp
+    - -I/Applications/ArmGNUToolchain/15.2.rel1/arm-none-eabi/arm-none-eabi/include/c++/15.2.1/backward
+    - -I/Applications/ArmGNUToolchain/15.2.rel1/arm-none-eabi/lib/gcc/arm-none-eabi/15.2.1/include
+    - -I/Applications/ArmGNUToolchain/15.2.rel1/arm-none-eabi/lib/gcc/arm-none-eabi/15.2.1/include-fixed
+    - -I/Applications/ArmGNUToolchain/15.2.rel1/arm-none-eabi/arm-none-eabi/include
+  Remove: []
+  CompilationDatabase: ./build/Debug
+  Compiler: /opt/homebrew/bin/arm-none-eabi-gcc

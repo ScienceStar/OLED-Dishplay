@@ -5,14 +5,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/* ================= 全局变量 ================= */
+/* ================= ?????? ================= */
 uint8_t esp8266_rx_byte;
 
 ESP8266_Line esp8266_lines[ESP8266_LINE_NUM];
 volatile uint8_t esp8266_line_write_index = 0;
 volatile uint8_t esp8266_line_read_index  = 0;
 
-/* ================== WiFi 自动重连 ================== */
+/* ================== WiFi ??????? ================== */
 uint32_t wifi_reconnect_tick = 0;
 #define WIFI_RECONNECT_INTERVAL 5000
 
@@ -20,15 +20,15 @@ uint32_t wifi_reconnect_tick = 0;
 uint8_t UartRxData;
 uint8_t UartRxbuf[1024], UartIntRxbuf[1024];
 uint16_t UartRxIndex = 0, UartRxFlag = 0, UartRxLen = 0, UartRxOKFlag = 0, UartIntRxLen = 0;
-volatile uint8_t WiFiStatus; // 0=断开,1=连接
+volatile uint8_t WiFiStatus; // 0=???,1=????
 int8_t WiFiRSSI = 0;
 
-/* 原始接收缓冲（给 MQTT / 透明数据用） */
+/* ????????壨?? MQTT / ?????????? */
 uint8_t esp8266_rx_buf[ESP8266_RX_MAX];
 volatile uint16_t esp8266_rx_len = 0;
 volatile uint8_t esp8266_rx_ok   = 0;
 
-/* ================= 初始化 ================= */
+/* ================= ????? ================= */
 bool ESP8266_Init(void)
 {
     esp8266_line_write_index = 0;
@@ -41,17 +41,17 @@ bool ESP8266_Init(void)
         esp8266_lines[i].line[0] = '\0';
     }
 
-    /* UART 由 main 统一启动接收，回调会转发给 ESP8266_RxHandler */
-    /* 避免重复启动接收导致缓冲冲突 */
+    /* UART ?? main ????????????????????? ESP8266_RxHandler */
+    /* ???????????????????????? */
     return true;
 }
 
-/* ================= 串口发送 + 等待 ================= */
+/* ================= ??????? + ??? ================= */
 bool ESP8266_SendAndWait(const char *cmd,
                          const char *ack,
                          uint32_t timeout)
 {
-    ESP8266_ClearRx(); // 清空全局接收缓冲区
+    ESP8266_ClearRx(); // ???????????????
 
     HAL_UART_Transmit(&ESP8266_UART,
                       (uint8_t *)cmd,
@@ -65,24 +65,24 @@ bool ESP8266_SendAndWait(const char *cmd,
     while ((HAL_GetTick() - start) < timeout) {
         if (esp8266_rx_len > 0) {
             uint8_t ch = esp8266_rx_buf[0];
-            // 左移整个缓冲区
+            // ??????????????
             memmove(esp8266_rx_buf, esp8266_rx_buf + 1, esp8266_rx_len - 1);
             esp8266_rx_len--;
 
             if (ch == ack[matched]) {
                 matched++;
                 if (matched == ack_len) {
-                    return true; // 匹配成功
+                    return true; // ??????
                 }
             } else {
-                matched = 0; // 重置匹配
+                matched = 0; // ???????
             }
         } else {
             HAL_Delay(1);
         }
     }
 
-    return false; // 超时
+    return false; // ???
 }
 
 /* ================= AT / WiFi / TCP ================= */
@@ -102,7 +102,7 @@ bool ESP8266_JoinAP(const char *ssid, const char *pwd)
 {
     char cmd[128];
     sprintf(cmd, "AT+CWJAP=\"%s\",\"%s\"\r\n", ssid, pwd);
-    /* 减少超时以避免主循环被长时间阻塞 */
+    /* ??????????????????????????? */
     return ESP8266_SendAndWait(cmd, "WIFI GOT IP", 3000);
 }
 
@@ -115,7 +115,7 @@ bool ESP8266_GetRSSI(void)
 {
     ESP8266_ClearRx();
 
-    // 发送查询命令
+    // ??????????
     HAL_UART_Transmit(&ESP8266_UART,
                       (uint8_t *)"AT+CWJAP?\r\n",
                       strlen("AT+CWJAP?\r\n"),
@@ -132,11 +132,11 @@ bool ESP8266_GetRSSI(void)
 
             printf("[ESP] %s\n", line->line);
 
-            // 查找 +CWJAP 行
+            // ???? +CWJAP ??
             if (strstr(line->line, "+CWJAP:")) {
 
                 /*
-                 * 示例：
+                 * ?????
                  * +CWJAP:"SSID","MAC",channel,-57
                  */
                 char *last_comma = strrchr(line->line, ',');
@@ -167,12 +167,26 @@ bool ESP8266_TCP_Connect(const char *ip, uint16_t port)
 {
     char cmd[64];
     sprintf(cmd, "AT+CIPSTART=\"TCP\",\"%s\",%d\r\n", ip, port);
-    /* 先短等待 CONNECT，再检查是否包含 FAIL/ERROR */
-    if (!ESP8266_SendAndWait(cmd, "CONNECT", 2000))
+    
+    // Clear receive buffer before connecting
+    ESP8266_ClearRx();
+    
+    /* Send command and wait for response */
+    if (!ESP8266_SendAndWait(cmd, "CONNECT", 3000)) {
+        // Check if we got an error message
+        if (strstr((char *)esp8266_rx_buf, "FAIL") || 
+            strstr((char *)esp8266_rx_buf, "ERROR") ||
+            strstr((char *)esp8266_rx_buf, "CLOSED")) {
+            return false;
+        }
         return false;
+    }
 
-    if (strstr((char *)esp8266_rx_buf, "FAIL") || strstr((char *)esp8266_rx_buf, "ERROR"))
+    // Double check no error in response
+    if (strstr((char *)esp8266_rx_buf, "FAIL") || 
+        strstr((char *)esp8266_rx_buf, "ERROR")) {
         return false;
+    }
 
     return true;
 }
@@ -195,20 +209,20 @@ bool ESP8266_TCP_Send(const char *data)
 
 bool ESP8266_TCP_Close(void)
 {
-    /* 清接收缓冲 */
+    /* ????????? */
     ESP8266_ClearRx();
 
-    /* 发送关闭指令 */
+    /* ????????? */
     ESP8266_SendString("AT+CIPCLOSE\r\n");
 
-    /* 等待 OK */
+    /* ??? OK */
     if (ESP8266_WaitResponse("OK", 2000))
         return true;
 
     return false;
 }
 
-/* ================= WiFi重连 ================= */
+/* ================= WiFi???? ================= */
 #define WIFI_RECONNECT_INTERVAL 5000
 
 void ESP_WiFi_ReconnectTask(void)
@@ -223,16 +237,16 @@ void ESP_WiFi_ReconnectTask(void)
     }
 }
 
-/* WiFi连接状态标志 */
+/* WiFi????????? */
 static uint8_t wifi_connected = 0;
 
 /**
- * @brief  判断ESP8266是否已连接WiFi
- * @retval 1=已连接  0=未连接
+ * @brief  ?ж?ESP8266?????????WiFi
+ * @retval 1=??????  0=δ????
  */
 uint8_t ESP8266_IsConnected(void)
 {
-    /* ---------- 已连接特征 ---------- */
+    /* ---------- ?????????? ---------- */
     if (strstr((char *)esp8266_rx_buf, "WIFI GOT IP") ||
         strstr((char *)esp8266_rx_buf, "STAIP") ||
         strstr((char *)esp8266_rx_buf, "CONNECTED")) {
@@ -240,7 +254,7 @@ uint8_t ESP8266_IsConnected(void)
         wifi_connected = 1;
     }
 
-    /* ---------- 断开特征 ---------- */
+    /* ---------- ??????? ---------- */
     if (strstr((char *)esp8266_rx_buf, "WIFI DISCONNECT") ||
         strstr((char *)esp8266_rx_buf, "DISCONNECT") ||
         strstr((char *)esp8266_rx_buf, "ERROR")) {
@@ -251,24 +265,24 @@ uint8_t ESP8266_IsConnected(void)
     return wifi_connected;
 }
 
-/* ================= 发送原始二进制数据 ================= */
+/* ================= ???????????????? ================= */
 bool ESP8266_SendRaw(uint8_t *data, uint16_t len)
 {
     if (!data || len == 0) return false;
 
     char cmd[32];
 
-    // 1. 发送 CIPSEND 命令，告诉模块即将发送 len 字节数据
+    // 1. ???? CIPSEND ??????????鼴?????? len ???????
     snprintf(cmd, sizeof(cmd), "AT+CIPSEND=%d\r\n", len);
 
-    // 等待 '>' 提示符
+    // ??? '>' ?????
     if (!ESP8266_SendAndWait(cmd, ">", 3000))
         return false;
 
-    // 2. 发送原始数据
+    // 2. ??????????
     HAL_UART_Transmit(&ESP8266_UART, data, len, 1000);
 
-    // 3. 等待 SEND OK 确认
+    // 3. ??? SEND OK ???
     if (!ESP8266_SendAndWait("", "SEND OK", 2000))
         return false;
 
@@ -276,10 +290,10 @@ bool ESP8266_SendRaw(uint8_t *data, uint16_t len)
 }
 
 /**
- * @brief  发送 AT 字符串指令
- * @param  str 要发送的字符串（不自动加 \r\n）
- * @retval true 发送成功
- *         false 发送失败
+ * @brief  ???? AT ????????
+ * @param  str ???????????????????? \r\n??
+ * @retval true ??????
+ *         false ???????
  */
 bool ESP8266_SendString(const char *str)
 {
@@ -292,11 +306,11 @@ bool ESP8266_SendString(const char *str)
 }
 
 /**
- * @brief  等待 ESP8266 返回关键字
- * @param  ack      关键字，如 "OK" / "ERROR"
- * @param  timeout  超时(ms)
- * @retval true  收到
- *         false 超时
+ * @brief  ??? ESP8266 ????????
+ * @param  ack      ???????? "OK" / "ERROR"
+ * @param  timeout  ???(ms)
+ * @retval true  ???
+ *         false ???
  */
 bool ESP8266_WaitResponse(const char *ack,
                           uint32_t timeout)
@@ -321,44 +335,44 @@ void ESP8266_ClearRx(void)
     esp8266_rx_len = 0;
 }
 
-/* ================= 进入透传模式 ================= */
+/* ================= ????????? ================= */
 bool ESP8266_TCP_EnterTransparent(void)
 {
-    // 设置透传模式
+    // ?????????
     if (!ESP8266_SendAndWait("AT+CIPMODE=1\r\n", "OK", 1000))
         return false;
 
-    // 开始 TCP 连接前，请确保连接成功
-    HAL_Delay(50); // 小延时保证模块稳定
+    // ??? TCP ??????????????????
+    HAL_Delay(50); // С????????????
 
     return true;
 }
 
-/* ================= 退出透传模式 ================= */
+/* ================= ???????? ================= */
 void ESP8266_TCP_ExitTransparent(void)
 {
-    // 退出透传模式需要发送 "+++"
-    // 注意：发送前至少 1 秒不要发数据，否则模块会误认为数据仍在透传
-    HAL_Delay(1100); // ESP8266 规范要求至少 1 秒静默
+    // ??????????????? "+++"
+    // ???????????? 1 ???????????????????????????????????
+    HAL_Delay(1100); // ESP8266 ?淶??????? 1 ???
 
     const char exit_seq[] = "+++";
     HAL_UART_Transmit(&ESP8266_UART, (uint8_t *)exit_seq, sizeof(exit_seq) - 1, 1000);
 
-    // 发送完后等待模块返回 OK
+    // ?????????????鷵?? OK
     ESP8266_SendAndWait("", "OK", 2000);
 }
 
-/* ================= 字节 → 行（核心修复点） ================= */
+/* ================= ??? ?? ?У?????????? ================= */
 void ESP8266_RxHandler(uint8_t ch)
 {
-    /* ===== 1. 原始流 ===== */
+    /* ===== 1. ???? ===== */
 
     if (esp8266_rx_len < ESP8266_RX_MAX - 1) {
         esp8266_rx_buf[esp8266_rx_len++] = ch;
         esp8266_rx_buf[esp8266_rx_len]   = '\0';
     }
 
-    /* ===== 2. 行模型 ===== */
+    /* ===== 2. ????? ===== */
 
     ESP8266_Line *line =
         &esp8266_lines[esp8266_line_write_index];
@@ -374,15 +388,15 @@ void ESP8266_RxHandler(uint8_t ch)
         goto NEXT_LINE;
     }
 
-    /* ---- 忽略 \r ---- */
+    /* ---- ???? \r ---- */
     if (ch == '\r')
         return;
 
-    /* ---- 行结束 ---- */
+    /* ---- ?н??? ---- */
     if (ch == '\n') {
 
         if (line->len == 0)
-            return; // 忽略空行
+            return; // ???????
 
         line->line[line->len] = '\0';
         line->ready           = 1;
@@ -390,14 +404,14 @@ void ESP8266_RxHandler(uint8_t ch)
         goto NEXT_LINE;
     }
 
-    /* ---- 普通字符 ---- */
+    /* ---- ?????? ---- */
     if (line->len < ESP8266_LINE_MAX - 1) {
         line->line[line->len++] = ch;
     }
 
     return;
 
-/* ===== 切行 ===== */
+/* ===== ???? ===== */
 NEXT_LINE:
 
     uint8_t next =

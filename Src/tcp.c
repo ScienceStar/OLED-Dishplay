@@ -17,12 +17,12 @@ static TCP_STATE tcp_state = TCP_IDLE;
 static uint8_t retry_count = 0;
 static uint32_t last_tick = 0;
 
-/* 循环发送控制 */
+/* 循环发送功能 */
 static uint32_t last_send_tick = 0;
 #define TCP_SEND_INTERVAL 1000 // 每1000ms发送一次
 static uint32_t last_heartbeat_tick = 0;
 
-/* ================= 独立计时器 ================= */
+/* ================= 定时器 ================= */
 static uint32_t last_at_tick      = 0;
 static uint32_t last_wifi_tick    = 0;
 static uint32_t last_connect_tick = 0;
@@ -44,7 +44,7 @@ void TCP_Task(void)
         break;
 
     case TCP_WIFI:
-        if (now - last_wifi_tick >= 500) { // 设置模式/连接AP每500ms
+        if (now - last_wifi_tick >= 500) { // 进入模式/连接AP每500ms
             last_wifi_tick = now;
             if (ESP8266_SetMode(STA)) {
                 if (ESP8266_JoinAP(WIFI_SSID, WIFI_PWD)) {
@@ -89,11 +89,11 @@ void TCP_Send_Test(void)
     }
 }
 
-/* ================= 循环发送函数 ================= */
+/* ================= 循环发送功能 ================= */
 void TCP_Send_Loop(void)
 {
     if (tcp_state != TCP_WORK)
-        return; // 未连接则不发送
+        return; // 未连接则返回
 
     uint32_t now = HAL_GetTick();
     if (now - last_send_tick >= TCP_SEND_INTERVAL)
@@ -103,7 +103,7 @@ void TCP_Send_Loop(void)
     }
 }
 
-/* ========== 心跳包 ========== */
+/* ========== 心跳 ========== */
 void TCP_Heartbeat(void)
 {
     uint32_t now = HAL_GetTick();

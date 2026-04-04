@@ -65,4 +65,9 @@ void MQTT_HandleIncomingData(MQTT_Client *client, const char *raw);
  */
 bool MQTT_Wait_CONNACK(uint32_t timeout_ms);
 
+/**
+ * 直接发送MQTT CONNECT包（不重新连接WiFi/TCP）
+ */
+bool MQTT_SendConnectPacket(void);
+
 #endif
