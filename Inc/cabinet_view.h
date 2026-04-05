@@ -24,4 +24,7 @@ extern void CabinetView_AddScrollLine(const char *text);
 /* 清空滚动行 */
 extern void CabinetView_ClearScrollLines(void);
 
+/* 测试：模拟接收MQTT消息（用于调试） */
+extern void CabinetView_TestSimulation(void);
+
 #endif

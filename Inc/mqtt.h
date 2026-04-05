@@ -4,8 +4,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define MQTT_BROKER_HOST "192.168.0.14"
-#define MQTT_BROKER_PORT 1896
+// 使用本地EMQX Broker
+#define MQTT_BROKER_HOST "192.168.0.6"
+#define MQTT_BROKER_PORT 1883  // EMQX默认端口是1883，不是1896
+
 #define MQTT_JSON_BUF_LEN 128
 #define MQTT_BROKER_MAXLEN 64
 #define MQTT_CLIENTID_MAXLEN 32
@@ -69,5 +71,15 @@ bool MQTT_Wait_CONNACK(uint32_t timeout_ms);
  * 直接发送MQTT CONNECT包（不重新连接WiFi/TCP）
  */
 bool MQTT_SendConnectPacket(void);
+
+/**
+ * 建立到MQTT Broker的TCP连接
+ */
+bool MQTT_ConnectToBroker(void);
+
+/**
+ * 完整的MQTT连接流程：TCP连接 + MQTT CONNECT
+ */
+bool MQTT_FullConnect(MQTT_Client *client);
 
 #endif

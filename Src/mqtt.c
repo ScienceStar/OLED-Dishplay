@@ -3,9 +3,10 @@
 #include <string.h>
 #include <stdio.h>
 #include "esp8266.h"
+#include "usart.h"
 
 /* ================== MQTT 客户端 ================== */
-MQTT_Client mqttClient                = {0}; // 全部字段初始化为 0
+MQTT_Client mqttClient = {0};
 
 /* ================= 初始化 ================= */
 bool MQTT_Init(MQTT_Client *client,
@@ -17,110 +18,173 @@ bool MQTT_Init(MQTT_Client *client,
     if (!client || !broker || !client_id || !topic)
         return false;
 
-    /* broker */
     if (strlen(broker) >= MQTT_BROKER_MAXLEN)
         return false;
     strcpy(client->broker, broker);
 
-    /* port */
     if (port == 0 || port > 65535)
         return false;
     client->port = port;
 
-    /* client id */
     if (strlen(client_id) >= MQTT_CLIENTID_MAXLEN)
         return false;
     strcpy(client->client_id, client_id);
 
-    /* topic */
     if (strlen(topic) >= MQTT_TOPIC_MAXLEN)
         return false;
     strcpy(client->topic, topic);
 
-    /* state init */
     client->connected = false;
     client->new_msg   = false;
-
     memset(client->json_buf, 0, MQTT_JSON_BUF_LEN);
 
     return true;
 }
 
 static const uint8_t mqtt_connect_pkt[] = {
-    0x10, 0x12, // MQTT Control Packet type = CONNECT
+    0x10, 0x12,
     0x00, 0x04, 'M', 'Q', 'T', 'T',
-    0x04,                          // MQTT version 3.1.1
-    0x02,                          // Clean Session
-    0x00, 0x3C,                    // KeepAlive = 60s
-    0x00, 0x04, 't', 'e', 's', 't' // ClientID = "test"
+    0x04,
+    0x02,
+    0x00, 0x3C,
+    0x00, 0x04, 't', 'e', 's', 't'
 };
 
 #define MQTT_CONNECT_PKT_SIZE sizeof(mqtt_connect_pkt)
 
-/* ================= 连接（逻辑） ================= */
-bool MQTT_Connect(MQTT_Client *client)
+/**
+ * @brief 建立到MQTT Broker的TCP连接
+ */
+bool MQTT_ConnectToBroker(void)
+{
+    char cmd[64];
+    
+    ESP8266_ClearRx();
+    
+    sprintf(cmd, "AT+CIPSTART=\"TCP\",\"%s\",%d\r\n", MQTT_BROKER_HOST, MQTT_BROKER_PORT);
+    
+    HAL_UART_Transmit(&huart2, (uint8_t *)cmd, strlen(cmd), 1000);
+    
+    uint32_t start = HAL_GetTick();
+    bool got_connect = false;
+    bool got_error = false;
+    
+    while (HAL_GetTick() - start < 10000) {
+        if (esp8266_rx_len > 0) {
+            esp8266_rx_buf[esp8266_rx_len] = '\0';
+            char *rx = (char *)esp8266_rx_buf;
+            
+            if (strstr(rx, "CONNECT") || strstr(rx, "OK")) {
+                got_connect = true;
+            }
+            
+            if (strstr(rx, "ERROR") || strstr(rx, "FAIL") || strstr(rx, "CLOSED")) {
+                got_error = true;
+            }
+            
+            if (got_connect && !got_error) {
+                return true;
+            }
+            
+            if (got_error) {
+                return false;
+            }
+        }
+        HAL_Delay(50);
+    }
+    
+    return false;
+}
+
+/**
+ * @brief 发送MQTT CONNECT包
+ */
+bool MQTT_SendConnectPacket(void)
+{
+    char cmd[32];
+    
+    ESP8266_ClearRx();
+    
+    sprintf(cmd, "AT+CIPSEND=%d\r\n", MQTT_CONNECT_PKT_SIZE);
+    HAL_UART_Transmit(&huart2, (uint8_t *)cmd, strlen(cmd), 1000);
+    
+    uint32_t start = HAL_GetTick();
+    while (HAL_GetTick() - start < 3000) {
+        if (esp8266_rx_len > 0) {
+            esp8266_rx_buf[esp8266_rx_len] = '\0';
+            if (strstr((char *)esp8266_rx_buf, ">")) {
+                break;
+            }
+            if (strstr((char *)esp8266_rx_buf, "ERROR")) {
+                return false;
+            }
+        }
+        HAL_Delay(10);
+    }
+    
+    HAL_UART_Transmit(&huart2, (uint8_t *)mqtt_connect_pkt, MQTT_CONNECT_PKT_SIZE, 1000);
+    
+    start = HAL_GetTick();
+    while (HAL_GetTick() - start < 3000) {
+        if (esp8266_rx_len > 0) {
+            esp8266_rx_buf[esp8266_rx_len] = '\0';
+            if (strstr((char *)esp8266_rx_buf, "SEND OK")) {
+                return true;
+            }
+            if (strstr((char *)esp8266_rx_buf, "ERROR") || 
+                strstr((char *)esp8266_rx_buf, "FAIL")) {
+                return false;
+            }
+        }
+        HAL_Delay(10);
+    }
+    
+    return false;
+}
+
+/**
+ * @brief 完整的MQTT连接流程
+ */
+bool MQTT_FullConnect(MQTT_Client *client)
 {
     if (!client) return false;
-
-    /* Clear buffer */
-    ESP8266_ClearRx();
-
-    /* Send CONNECT packet */
-    if (!ESP8266_SendRaw((uint8_t *)mqtt_connect_pkt, MQTT_CONNECT_PKT_SIZE))
-        return false;
-
-    /* Wait for CONNACK */
-    if (!MQTT_Wait_CONNACK(3000)) {
-        printf("[MQTT] CONNACK timeout, esp8266_rx_len=%u\n", esp8266_rx_len);
-        if (esp8266_rx_len > 0) {
-            printf("[MQTT] esp8266_rx_buf(hex):");
-            for (uint16_t i = 0; i < esp8266_rx_len && i < 64; i++) {
-                printf(" %02X", esp8266_rx_buf[i]);
-            }
-            printf("\n");
-        }
+    
+    if (!MQTT_ConnectToBroker()) {
         return false;
     }
-
+    
+    HAL_Delay(1000);
+    
+    if (!MQTT_SendConnectPacket()) {
+        return false;
+    }
+    
+    HAL_Delay(200);
+    
+    if (!MQTT_Wait_CONNACK(5000)) {
+        return false;
+    }
+    
     client->connected = true;
     return true;
 }
 
 /**
- * @brief 直接发送MQTT CONNECT包（不重新连接WiFi/TCP）
- * @return true 成功, false 失败
- */
-bool MQTT_SendConnectPacket(void)
-{
-    ESP8266_ClearRx();
-    return ESP8266_SendRaw((uint8_t *)mqtt_connect_pkt, MQTT_CONNECT_PKT_SIZE);
-}
-
-/**
  * @brief 轻量级 MQTT 循环处理函数
- * @param client MQTT 客户端结构体
- * @param timeout_ms 超时时间（毫秒）
- * @note 这个函数用于代替 MQTT_Yield
  */
 void MQTT_Yield(MQTT_Client *client, uint32_t timeout_ms)
 {
     uint32_t start = HAL_GetTick();
 
     while (HAL_GetTick() - start < timeout_ms) {
-        // 如果ESP8266有接收到数据
         if (esp8266_rx_len > 0) {
-            // 拷贝数据到本地缓冲
             uint16_t len = esp8266_rx_len;
-            if (len > 127) len = 127; // 限制缓冲
+            if (len > 127) len = 127;
             memcpy(client->json_buf, esp8266_rx_buf, len);
             client->json_buf[len] = '\0';
-            esp8266_rx_len        = 0;
-
-            // 标记有新消息
+            esp8266_rx_len = 0;
             client->new_msg = true;
         }
-
-        // 这里不做心跳，保持最简单
     }
 }
 
@@ -130,36 +194,30 @@ bool MQTT_Subscribe(MQTT_Client *client)
     if (!client || !client->connected)
         return false;
 
-    uint8_t sub_pkt[128]; // 根据 topic 长度动态调整即可
-    uint16_t len       = 0;
+    uint8_t sub_pkt[128];
+    uint16_t len = 0;
     uint16_t topic_len = strlen(client->topic);
 
     if (topic_len + 5 > sizeof(sub_pkt))
-        return false; // topic 太长
+        return false;
 
-    /* 固定报文头：SUBSCRIBE, QoS 1 */
-    sub_pkt[len++] = 0x82;          // SUBSCRIBE, QoS=1
-    sub_pkt[len++] = topic_len + 3; // 剩余长度 = PacketID(2) + topic_len + QoS(1)
+    sub_pkt[len++] = 0x82;
+    sub_pkt[len++] = topic_len + 3;
 
-    /* Packet ID */
     sub_pkt[len++] = (MQTT_SUB_PACKET_ID >> 8) & 0xFF;
     sub_pkt[len++] = MQTT_SUB_PACKET_ID & 0xFF;
 
-    /* Topic */
     sub_pkt[len++] = (topic_len >> 8) & 0xFF;
     sub_pkt[len++] = topic_len & 0xFF;
     memcpy(&sub_pkt[len], client->topic, topic_len);
     len += topic_len;
 
-    /* QoS */
-    sub_pkt[len++] = 0x00; // QoS 0
+    sub_pkt[len++] = 0x00;
 
-    /* 发送报文 */
-    if (!ESP8266_SendRaw(sub_pkt, len))
+    if (!ESP8266_SendRaw(sub_pkt, len)) {
         return false;
+    }
 
-    /* 等待 SUBACK 响应（简化版，实际可解析二进制） */
-    // 如果你还没实现二进制解析，先直接返回 true
     return true;
 }
 
@@ -182,33 +240,26 @@ void MQTT_SimulateIncomingMessage(MQTT_Client *client, const char *json)
 
     strncpy(client->json_buf, json, MQTT_JSON_BUF_LEN - 1);
     client->json_buf[MQTT_JSON_BUF_LEN - 1] = '\0';
-    client->new_msg                         = true;
+    client->new_msg = true;
 }
 
 /* ================= 处理 ESP8266 原始串口数据 ================= */
-/*
- * 支持以下格式：
- * 1) {"cell":"01","open":1,"err":0}
- * 2) +MQTTSUB:"topic",{"cell":"01","open":1,"err":0}
- */
 void MQTT_HandleIncomingData(MQTT_Client *client, const char *raw)
 {
     if (!client || !raw) return;
 
-    /* 情况 1：ESP8266 直接吐 JSON */
     if (raw[0] == '{') {
         strncpy(client->json_buf, raw, MQTT_JSON_BUF_LEN - 1);
         client->json_buf[MQTT_JSON_BUF_LEN - 1] = '\0';
-        client->new_msg                         = true;
+        client->new_msg = true;
         return;
     }
 
-    /* 情况 2：AT 返回，截取 payload */
     const char *json = strchr(raw, '{');
     if (json) {
         strncpy(client->json_buf, json, MQTT_JSON_BUF_LEN - 1);
         client->json_buf[MQTT_JSON_BUF_LEN - 1] = '\0';
-        client->new_msg                         = true;
+        client->new_msg = true;
     }
 }
 
@@ -218,25 +269,22 @@ bool MQTT_Wait_CONNACK(uint32_t timeout_ms)
 
     while (HAL_GetTick() - tick < timeout_ms) {
         if (esp8266_rx_len >= 4) {
-            // 扫描接收缓冲，查找 CONNACK 二进制帧（可能被 +IPD 包裹）
             for (uint16_t i = 0; i + 4 <= esp8266_rx_len; i++) {
-                uint8_t *p = &esp8266_rx_buf[i];
-                // CONNACK 固定报头 0x20, 剩余长度 0x02, 第二字节后的返回码在 p[3]
-                if (p[0] == 0x20 && p[1] == 0x02 && p[3] == 0x00) {
-                    // 消费掉缓冲中已检测到的数据，避免重复处理
-                    if (i + 4 < esp8266_rx_len) {
-                        // 将剩余数据前移
-                        memmove(esp8266_rx_buf, esp8266_rx_buf + i + 4, esp8266_rx_len - (i + 4));
-                        esp8266_rx_len -= (i + 4);
-                    } else {
-                        esp8266_rx_len = 0;
+                if (esp8266_rx_buf[i] == 0x20 &&
+                    esp8266_rx_buf[i+1] == 0x02 &&
+                    esp8266_rx_buf[i+3] == 0x00) {
+                    
+                    uint16_t remaining = esp8266_rx_len - (i + 4);
+                    if (remaining > 0) {
+                        memmove(esp8266_rx_buf, &esp8266_rx_buf[i+4], remaining);
                     }
+                    esp8266_rx_len = remaining;
+                    
                     return true;
                 }
             }
         }
-        // Small delay to prevent busy waiting
-        HAL_Delay(1);
+        HAL_Delay(10);
     }
 
     return false;

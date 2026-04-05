@@ -21,6 +21,21 @@
 #define MQTT_JSON_BUF_LEN 128
 char mqtt_json_buf[MQTT_JSON_BUF_LEN] = {0};
 
+/* ================== Global Variables for Link Health ================== */
+static uint32_t last_esp8266_activity_tick = 0; 
+#define LINK_HEALTH_TIMEOUT_MS 30000  // Increased from 15s to 30s to prevent false timeouts
+
+// ????????????????????
+static char last_debug_status[64] = {0};
+
+// ??????
+static uint8_t connection_stage = 0; // 0=Init, 1=WiFi, 2=TCP, 3=MQTT, 4=Connected
+static uint32_t last_wifi_connect_attempt = 0;
+#define WIFI_CONNECT_COOLDOWN 10000  // 10????????????
+
+// ??????MQTT???????????
+#define ENABLE_TEST_MODE 1  // ???1?????0??
+
 /* ================== Morse State ================== */
 typedef struct {
     const char *code;
@@ -32,18 +47,6 @@ typedef struct {
 
 /* SOS */
 static MorseState morse = {"...---...", 0, 0, 0, DOT_DURATION};
-
-/* ================== Global Variables for Link Health ================== */
-static uint32_t last_esp8266_activity_tick = 0; 
-#define LINK_HEALTH_TIMEOUT_MS 30000  // Increased from 15s to 30s to prevent false timeouts
-
-// ???????????????????????????????
-static char last_debug_status[64] = {0};
-
-// ?????????
-static uint8_t connection_stage = 0; // 0=Init, 1=WiFi, 2=TCP, 3=MQTT, 4=Connected
-static uint32_t last_wifi_connect_attempt = 0;
-#define WIFI_CONNECT_COOLDOWN 10000  // 10???????????????????
 
 /* ================== Morse Task (Precision Optimized) ================== */
 void Morse_Task(void)
@@ -89,15 +92,14 @@ void ESP8266_StatusParse(uint8_t *buf)
 {
     if (buf == NULL || strlen((char *)buf) == 0) return;
 
-    // ????????? - ??ESP8266??????????
+    // ?????? - ??ESP8266??????
     last_esp8266_activity_tick = HAL_GetTick();
     
-    // ????????????????????
+    // ????????????
     strncpy(last_debug_status, (char*)buf, sizeof(last_debug_status)-1);
     last_debug_status[sizeof(last_debug_status)-1] = '\0';
 
     /* ---------- WiFi Status ---------- */
-    // ??????? GOT IP?????????????
     if (strstr((char *)buf, "WIFI GOT IP") || strstr((char *)buf, "GOT IP")) {
         WiFiStatus = 1;
         connection_stage = 1;
@@ -110,13 +112,13 @@ void ESP8266_StatusParse(uint8_t *buf)
         connection_stage = 1;
     }
 
-    // ??????????? - ????????DISCONNECT?????????
+    // ??????
     if (strstr((char *)buf, "WIFI DISCONNECT") ||
         strstr((char *)buf, "WIFI DISCONNECTED")) 
     {
         WiFiStatus = 0;
-        TcpClosedFlag = 1;
         mqttClient.connected = 0;
+        TcpClosedFlag = 1;  // Keep for internal use
         connection_stage = 0;
         extern uint32_t wifi_reconnect_tick;
         wifi_reconnect_tick = 0; 
@@ -133,13 +135,14 @@ void ESP8266_StatusParse(uint8_t *buf)
         connection_stage = 1;
     }
 
-    /* ---------- TCP Status ---------- */
+    /* ---------- MQTT/TCP Status ---------- */
+    // For MQTT, we care about connection state
     if (strstr((char *)buf, "CLOSED") ||
         strstr((char *)buf, "CONNECT FAIL") ||
         strstr((char *)buf, "ERROR"))
     {
-        TcpClosedFlag = 1;
         mqttClient.connected = 0;
+        TcpClosedFlag = 1;
         if (connection_stage >= 2) connection_stage = 1;
     }
 
@@ -153,6 +156,7 @@ void ESP8266_StatusParse(uint8_t *buf)
         connection_stage = 2;
     }
     
+    // MQTT data received
     if (strstr((char *)buf, "+IPD")) {
         TcpClosedFlag = 0;
         if (connection_stage < 2) connection_stage = 2;
@@ -169,13 +173,14 @@ int main(void)
     OLED_Init();
     OLED_Clear();
     
-    // ??????????
+    // ??????
     OLED_ShowStringSmall(0, 0, (uint8_t*)"System Boot...");
+    OLED_ShowStringSmall(0, 2, (uint8_t*)"Initializing...");
 
-    // 1. ????? ESP8266
+    // 1. ??? ESP8266
     ESP8266_Init();
 
-    // 2. ???? UART ??
+    // 2. ?? UART ??
     HAL_UART_Receive_IT(&huart2, &UartRxData, 1);
 
     CabinetView_Init();
@@ -187,21 +192,22 @@ int main(void)
               "cabinet.bridge.to.device");
 
     uint32_t last_led_tick    = 0;
-    uint32_t last_scroll_tick = 0;
+    uint32_t last_scroll_tick = 0;  // ??????????
     uint32_t mqtt_tick        = 0;
     uint32_t wifi_reconnect_tick = 0;
+    uint32_t last_status_update_tick = 0;  // ?????????
     
     last_esp8266_activity_tick = HAL_GetTick();
     last_wifi_connect_attempt = HAL_GetTick();
     
-    // ?????????????????????
+    // ?????????????
     morse.next_tick = HAL_GetTick();
 
     while (1)
     {
         uint32_t now = HAL_GetTick();
 
-        /* ===== Morse Task (?????????????????????) ===== */
+        /* ===== Morse Task (????????????) ===== */
         Morse_Task();
 
         /* ===== WiFi Management - Simplified ===== */
@@ -211,7 +217,7 @@ int main(void)
                 now - last_wifi_connect_attempt > WIFI_CONNECT_COOLDOWN) {
                 wifi_reconnect_tick = now;
                 last_wifi_connect_attempt = now;
-                OLED_ShowStringSmall(0, 2, (uint8_t*)"Trying WiFi...");
+                // Don't update OLED here to avoid flicker
                 ESP_WiFi_ReconnectTask(); 
             }
         } else {
@@ -230,102 +236,65 @@ int main(void)
             strcpy(last_debug_status, "Link Timeout");
         }
 
-        /* ===== TCP Management - Reconnect if needed ===== */
-        // If WiFi is up but TCP is down, try to reconnect TCP
-        if (WiFiStatus && TcpClosedFlag) {
-            static uint32_t tcp_reconnect_tick = 0;
-            if (now - tcp_reconnect_tick > 5000) {  // ?5?????
-                tcp_reconnect_tick = now;
-                OLED_ShowStringSmall(0, 4, (uint8_t*)"Conn TCP...   ");
-                
-                if (ESP8266_TCP_Connect(TCP_SERVER_IP, TCP_SERVER_PORT)) {
-                    TcpClosedFlag = 0;
-                    connection_stage = 2;
-                    OLED_ShowStringSmall(0, 4, (uint8_t*)"TCP OK        ");
-                } else {
-                    OLED_ShowStringSmall(0, 4, (uint8_t*)"TCP Fail      ");
-                }
+        /* ===== Simplified Connection Logic - MQTT Only ===== */
+        
+        // If WiFi is up but MQTT not connected, try to connect MQTT
+        if (WiFiStatus && !mqttClient.connected && (now - mqtt_tick > 10000)) {
+            mqtt_tick = now;
+            
+            // Try to connect
+            if (MQTT_FullConnect(&mqttClient)) {
+                mqttClient.connected = true;
+                MQTT_Subscribe(&mqttClient);
+                connection_stage = 3;
+            } else {
+                mqttClient.connected = false;
+                TcpClosedFlag = 1;
             }
         }
         
-        // Send data and heartbeat only when both WiFi and TCP are up
-        if (WiFiStatus && !TcpClosedFlag) {
-            TCP_Send_Loop();
+        // Send heartbeat if MQTT is connected
+        if (WiFiStatus && mqttClient.connected) {
             TCP_Heartbeat();
         }
 
-        /* ===== MQTT Connection Logic - Only after TCP is stable ===== */
-        // Try MQTT connection only when TCP is connected and stable
-        if (WiFiStatus && !TcpClosedFlag && !mqttClient.connected &&
-            (now - mqtt_tick > 5000))  // Wait 5s between attempts
-        {
-            mqtt_tick = now;
-            OLED_ShowStringSmall(0, 4, (uint8_t*)"Conn MQTT...  ");
+        /* ===== Status Display - Simple and stable ===== */
+        if (now - last_status_update_tick > 2000) {
+            last_status_update_tick = now;
             
-            // Send MQTT CONNECT packet
-            if (MQTT_SendConnectPacket()) {
-                if (MQTT_Wait_CONNACK(3000)) {
-                    mqttClient.connected = true;
-                    MQTT_Subscribe(&mqttClient);
-                    connection_stage = 3;
-                    OLED_ShowStringSmall(0, 4, (uint8_t*)"MQTT OK       ");
-                } else {
-                    // MQTT connect failed, but TCP might still be ok
-                    mqttClient.connected = false;
-                    OLED_ShowStringSmall(0, 4, (uint8_t*)"MQTT No ACK   ");
-                }
-            } else {
-                // Failed to send MQTT packet, TCP might be broken
-                TcpClosedFlag = 1;
-                mqttClient.connected = false;
-                OLED_ShowStringSmall(0, 4, (uint8_t*)"MQTT Send Fail");
+            char wifi_char = 'X';
+            char mqtt_char = 'X';
+
+            if (WiFiStatus) {
+                if (WiFiRSSI >= -50) wifi_char = '*';
+                else if (WiFiRSSI >= -70) wifi_char = '+';
+                else wifi_char = '.';
             }
-        }
+            
+            if (mqttClient.connected) {
+                mqtt_char = 'M';
+            }
 
-        /* ===== Status Display ===== */
-        char wifi_char = 'X';
-        char tcp_char  = 'X';
-        char mqtt_char = 'X';
-
-        // WiFi status
-        if (WiFiStatus) {
-            if (WiFiRSSI >= -50) wifi_char = '*';
-            else if (WiFiRSSI >= -70) wifi_char = '+';
-            else wifi_char = '.';
-        }
-
-        // TCP status - only show T if TCP is actually connected
-        if (!TcpClosedFlag && WiFiStatus) {
-            tcp_char = 'T';
-        }
-        
-        // MQTT status
-        if (mqttClient.connected) {
-            mqtt_char = 'M';
-        }
-
-        char status[24];
-        sprintf(status, "W:%c T:%c M:%c", wifi_char, tcp_char, mqtt_char);
-        OLED_ShowStringSmall(20, 0, (uint8_t *)status);
-        
-        // Enhanced debug info - show more details
-        char debug_line[24];
-        if (!WiFiStatus) {
-             sprintf(debug_line, "S:%d R:%d", connection_stage, WiFiRSSI);
-             OLED_ShowStringSmall(0, 6, (uint8_t *)debug_line);
-        } else if (TcpClosedFlag) {
-             // WiFi up, TCP down
-             sprintf(debug_line, "TCP:%s:%d", TCP_SERVER_IP, TCP_SERVER_PORT);
-             OLED_ShowStringSmall(0, 6, (uint8_t *)debug_line);
-        } else if (!mqttClient.connected) {
-             // WiFi & TCP up, MQTT down
-             sprintf(debug_line, "MQTT:%s:%d", MQTT_BROKER_HOST, MQTT_BROKER_PORT);
-             OLED_ShowStringSmall(0, 6, (uint8_t *)debug_line);
-        } else {
-             // All connected
-             uint32_t idle_time = (now - last_esp8266_activity_tick) / 1000;
-             sprintf(debug_line, "OK I:%lus", idle_time);
-             OLED_ShowStringSmall(0, 6, (uint8_t *)debug_line);
+            char status[24];
+            sprintf(status, "W:%c M:%c      ", wifi_char, mqtt_char);
+            OLED_ShowStringSmall(20, 0, (uint8_t *)status);
+            
+            char debug_line[24];
+            if (!WiFiStatus) {
+                 sprintf(debug_line, "WiFi:Not Conn ");
+                 OLED_ShowStringSmall(0, 6, (uint8_t *)debug_line);
+            } else if (!mqttClient.connected) {
+#if ENABLE_TEST_MODE
+                 sprintf(debug_line, "TEST MODE     ");
+                 CabinetView_TestSimulation();
+#else
+                 sprintf(debug_line, "%.19s", "Connecting...   ");
+#endif
+                 OLED_ShowStringSmall(0, 6, (uint8_t *)debug_line);
+            } else {
+                 sprintf(debug_line, "MQTT Connected");
+                 OLED_ShowStringSmall(0, 6, (uint8_t *)debug_line);
+            }
         }
 
         /* ===== UART Data Processing ===== */
@@ -360,9 +329,9 @@ int main(void)
             CabinetView_UpdateFromJson(mqttClient.json_buf);
         }
 
-        /* ===== OLED Scroll ===== */
+        /* ===== OLED Scroll & Rotate ===== */
         CabinetView_ScrollTaskSmall(0);
-        if (now - last_scroll_tick > 300) {
+        if (now - last_scroll_tick > 3000) {
             last_scroll_tick = now;
             CabinetView_RotateDisplay();
         }
