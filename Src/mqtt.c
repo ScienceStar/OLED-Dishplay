@@ -53,11 +53,60 @@ static const uint8_t mqtt_connect_pkt[] = {
 #define MQTT_CONNECT_PKT_SIZE sizeof(mqtt_connect_pkt)
 
 /**
+ * @brief 构建MQTT CONNECT包（动态client_id）
+ */
+static uint16_t MQTT_BuildConnectPacket(uint8_t *buf, uint16_t buf_size, const char *client_id)
+{
+    if (!client_id) return 0;
+    
+    uint16_t client_id_len = strlen(client_id);
+    uint16_t remaining_len = 10 + 2 + client_id_len;
+    
+    if (remaining_len + 2 > buf_size) return 0;
+    
+    uint16_t pos = 0;
+    
+    // Fixed header
+    buf[pos++] = 0x10;
+    buf[pos++] = remaining_len;
+    
+    // Variable header - Protocol Name "MQTT"
+    buf[pos++] = 0x00;
+    buf[pos++] = 0x04;
+    buf[pos++] = 'M';
+    buf[pos++] = 'Q';
+    buf[pos++] = 'T';
+    buf[pos++] = 'T';
+    
+    // Protocol Level 4 (MQTT 3.1.1)
+    buf[pos++] = 0x04;
+    
+    // Connect Flags (Clean Session)
+    buf[pos++] = 0x02;
+    
+    // Keep Alive (60 seconds)
+    buf[pos++] = 0x00;
+    buf[pos++] = 0x3C;
+    
+    // Payload - Client ID
+    buf[pos++] = (client_id_len >> 8) & 0xFF;
+    buf[pos++] = client_id_len & 0xFF;
+    memcpy(&buf[pos], client_id, client_id_len);
+    pos += client_id_len;
+    
+    return pos;
+}
+
+/**
  * @brief 建立到MQTT Broker的TCP连接
  */
 bool MQTT_ConnectToBroker(void)
 {
     char cmd[64];
+    
+    // 先关闭可能存在的旧TCP连接
+    ESP8266_TCP_Close();
+    HAL_Delay(200);
     
     ESP8266_ClearRx();
     
@@ -66,23 +115,24 @@ bool MQTT_ConnectToBroker(void)
     HAL_UART_Transmit(&huart2, (uint8_t *)cmd, strlen(cmd), 1000);
     
     uint32_t start = HAL_GetTick();
-    bool got_connect = false;
+    bool got_ok = false;
     bool got_error = false;
     
-    while (HAL_GetTick() - start < 10000) {
+    // 超时5秒
+    while (HAL_GetTick() - start < 5000) {
         if (esp8266_rx_len > 0) {
             esp8266_rx_buf[esp8266_rx_len] = '\0';
             char *rx = (char *)esp8266_rx_buf;
             
-            if (strstr(rx, "CONNECT") || strstr(rx, "OK")) {
-                got_connect = true;
+            if (strstr(rx, "OK") || strstr(rx, "CONNECT")) {
+                got_ok = true;
             }
             
             if (strstr(rx, "ERROR") || strstr(rx, "FAIL") || strstr(rx, "CLOSED")) {
                 got_error = true;
             }
             
-            if (got_connect && !got_error) {
+            if (got_ok && !got_error) {
                 return true;
             }
             
@@ -90,26 +140,35 @@ bool MQTT_ConnectToBroker(void)
                 return false;
             }
         }
-        HAL_Delay(50);
+        HAL_Delay(20);
     }
     
     return false;
 }
 
 /**
- * @brief 发送MQTT CONNECT包
+ * @brief 发送MQTT CONNECT包（使用动态client_id）
  */
 bool MQTT_SendConnectPacket(void)
 {
     char cmd[32];
     
+    // 动态构建CONNECT包
+    uint8_t connect_pkt[128];
+    uint16_t pkt_len = MQTT_BuildConnectPacket(connect_pkt, sizeof(connect_pkt), mqttClient.client_id);
+    
+    if (pkt_len == 0) {
+        return false;
+    }
+    
     ESP8266_ClearRx();
     
-    sprintf(cmd, "AT+CIPSEND=%d\r\n", MQTT_CONNECT_PKT_SIZE);
+    sprintf(cmd, "AT+CIPSEND=%d\r\n", pkt_len);
     HAL_UART_Transmit(&huart2, (uint8_t *)cmd, strlen(cmd), 1000);
     
+    // 等待 ">" 提示符（超时1秒）
     uint32_t start = HAL_GetTick();
-    while (HAL_GetTick() - start < 3000) {
+    while (HAL_GetTick() - start < 1000) {
         if (esp8266_rx_len > 0) {
             esp8266_rx_buf[esp8266_rx_len] = '\0';
             if (strstr((char *)esp8266_rx_buf, ">")) {
@@ -119,13 +178,15 @@ bool MQTT_SendConnectPacket(void)
                 return false;
             }
         }
-        HAL_Delay(10);
+        HAL_Delay(5);
     }
     
-    HAL_UART_Transmit(&huart2, (uint8_t *)mqtt_connect_pkt, MQTT_CONNECT_PKT_SIZE, 1000);
+    // 发送MQTT CONNECT包
+    HAL_UART_Transmit(&huart2, connect_pkt, pkt_len, 1000);
     
+    // 等待 "SEND OK"（超时1秒）
     start = HAL_GetTick();
-    while (HAL_GetTick() - start < 3000) {
+    while (HAL_GetTick() - start < 1000) {
         if (esp8266_rx_len > 0) {
             esp8266_rx_buf[esp8266_rx_len] = '\0';
             if (strstr((char *)esp8266_rx_buf, "SEND OK")) {
@@ -136,7 +197,7 @@ bool MQTT_SendConnectPacket(void)
                 return false;
             }
         }
-        HAL_Delay(10);
+        HAL_Delay(5);
     }
     
     return false;
@@ -149,19 +210,22 @@ bool MQTT_FullConnect(MQTT_Client *client)
 {
     if (!client) return false;
     
+    // 第一步：建立TCP连接
     if (!MQTT_ConnectToBroker()) {
         return false;
     }
     
-    HAL_Delay(1000);
+    HAL_Delay(100);
     
+    // 第二步：发送MQTT CONNECT包
     if (!MQTT_SendConnectPacket()) {
         return false;
     }
     
-    HAL_Delay(200);
+    HAL_Delay(100);
     
-    if (!MQTT_Wait_CONNACK(5000)) {
+    // 第三步：等待CONNACK（超时3秒）
+    if (!MQTT_Wait_CONNACK(3000)) {
         return false;
     }
     
